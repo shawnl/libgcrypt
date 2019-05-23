@@ -1,12 +1,16 @@
-#! /usr/bin/env perl
-# SPDX-License-Identifier: BSD-3-Clause
+#!/usr/bin/env perl
 
-# ====================================================================
-# Written by Andy Polyakov <appro@openssl.org> for the OpenSSL
-# project. The module is, however, dual licensed under OpenSSL and
-# CRYPTOGAMS licenses depending on where you obtain it. For further
-# details see http://www.openssl.org/~appro/cryptogams/.
-# ====================================================================
+# PowerPC assembler distiller by \@dot-asm.
+
+################################################################
+# Recognized "flavour"-s are:
+#
+# linux{32|64}[le]  GNU assembler and ELF symbol decorations,
+#                   with little-endian option
+# linux64v2         GNU asssembler and big-endian instantiation
+#                   of latest ELF specification
+# aix{32|64}        AIX assembler and symbol decorations
+# osx{32|64}        Mac OS X assembler and symbol decoratons
 
 my $flavour = shift;
 my $output = shift;
@@ -51,7 +55,7 @@ my $globl = sub {
 	/osx/		&& do { $name = "_$name";
 				last;
 			      };
-	/linux.*(32|64le)/
+	/linux.*(32|64(le|v2))/
 			&& do {	$ret .= ".globl	$name";
 				if (!$$type) {
 				    $ret .= "\n.type	$name,\@function";
@@ -82,7 +86,7 @@ my $globl = sub {
 };
 my $text = sub {
     my $ret = ($flavour =~ /aix/) ? ".csect\t.text[PR],7" : ".text";
-    $ret = ".abiversion	2\n".$ret	if ($flavour =~ /linux.*64le/);
+    $ret = ".abiversion	2\n".$ret	if ($flavour =~ /linux.*64(le|v2)/);
     $ret;
 };
 my $machine = sub {
@@ -188,7 +192,7 @@ my $vmr = sub {
 
 # Some ABIs specify vrsave, special-purpose register #256, as reserved
 # for system use.
-my $no_vrsave = ($flavour =~ /aix|linux64le/);
+my $no_vrsave = ($flavour =~ /aix|linux64(le|v2)/);
 my $mtspr = sub {
     my ($f,$idx,$ra) = @_;
     if ($idx == 256 && $no_vrsave) {
@@ -322,7 +326,7 @@ while($line=<>) {
 	if ($label) {
 	    my $xlated = ($GLOBALS{$label} or $label);
 	    print "$xlated:";
-	    if ($flavour =~ /linux.*64le/) {
+	    if ($flavour =~ /linux.*64(le|v2)/) {
 		if ($TYPES{$label} =~ /function/) {
 		    printf "\n.localentry	%s,0\n",$xlated;
 		}
@@ -346,3 +350,4 @@ while($line=<>) {
 }
 
 close STDOUT;
+

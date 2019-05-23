@@ -96,6 +96,10 @@ EXTRA_libcipher_la_SOURCES = \
 	rijndael-ssse3-amd64.c rijndael-ssse3-amd64-asm.S  \
 	rijndael-armv8-ce.c rijndael-armv8-aarch32-ce.S    \
 	rijndael-armv8-aarch64-ce.S rijndael-aarch64.S     \
+	rijndael-ppc8.pl \
+	rijndael-ppc8.S	\
+	rijndael-ppc8be.S \
+	rijndael-ppc832.S \
 	rmd160.c \
 	rsa.c \
 	salsa20.c salsa20-amd64.S salsa20-armv7-neon.S \

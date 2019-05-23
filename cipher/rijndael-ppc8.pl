@@ -1,6 +1,9 @@
 #! /usr/bin/env perl
 # SPDX-License-Identifier: BSD-3-Clause
 #
+# Changes: adjust struct offsets to work with libgcrypt ctx
+#          rename ppc-xlate.pl
+#
 # ====================================================================
 # Written by Andy Polyakov <appro@openssl.org> for the OpenSSL
 # project. The module is, however, dual licensed under OpenSSL and
@@ -60,6 +63,7 @@ if ($flavour =~ /64/) {
 $LITTLE_ENDIAN = ($flavour=~/le$/) ? $SIZE_T : 0;
 
 $0 =~ m/(.*[\/\\])[^\/\\]+$/; $dir=$1;
+( $xlate="${dir}asm-common-ppc.pl" and -f $xlate ) or
 ( $xlate="${dir}ppc-xlate.pl" and -f $xlate ) or
 ( $xlate="${dir}../../perlasm/ppc-xlate.pl" and -f $xlate) or
 die "can't locate ppc-xlate.pl";
@@ -353,7 +357,6 @@ Ldone:
 	stvx		$in1,0,$inp
 	li		$ptr,0
 	mtspr		256,$vrsave
-	stw		$rounds,0($out)
 
 Lenc_key_abort:
 	mr		r3,$ptr
@@ -417,13 +420,14 @@ ___
 sub gen_block () {
 my $dir = shift;
 my $n   = $dir eq "de" ? "n" : "";
+my $rounds_off = $dir eq "de" ? "240" : "480";
 my ($inp,$out,$key,$rounds,$idx)=map("r$_",(3..7));
 
 $code.=<<___;
 .globl	.${prefix}_${dir}crypt
 .align	5
 .${prefix}_${dir}crypt:
-	lwz		$rounds,240($key)
+	lwz		$rounds,$rounds_off($key)
 	lis		r0,0xfc00
 	mfspr		$vrsave,256
 	li		$idx,15			# 15 is not typo
@@ -522,7 +526,7 @@ $code.=<<___;
 
 	neg		r11,$inp
 	?lvsl		$keyperm,0,$key		# prepare for unaligned key
-	lwz		$rounds,240($key)
+	lwz		$rounds,480($key)
 
 	lvsr		$inpperm,0,r11		# prepare for unaligned load
 	lvx		$inptail,0,$inp
@@ -1283,7 +1287,7 @@ $code.=<<___;
 
 	neg		r11,$inp
 	?lvsl		$keyperm,0,$key		# prepare for unaligned key
-	lwz		$rounds,240($key)
+	lwz		$rounds,480($key)
 
 	lvsr		$inpperm,0,r11		# prepare for unaligned load
 	lvx		$inptail,0,$inp
@@ -1958,7 +1962,7 @@ $code.=<<___;
 	beq		Lxts_enc_no_key2
 
 	?lvsl		$keyperm,0,$key2		# prepare for unaligned key
-	lwz		$rounds,240($key2)
+	lwz		$rounds,480($key2)
 	srwi		$rounds,$rounds,1
 	subi		$rounds,$rounds,1
 	li		$idx,16
@@ -2002,7 +2006,7 @@ Lxts_enc:
 	addi		$inp,$inp,16
 
 	?lvsl		$keyperm,0,$key1		# prepare for unaligned key
-	lwz		$rounds,240($key1)
+	lwz		$rounds,480($key1)
 	srwi		$rounds,$rounds,1
 	subi		$rounds,$rounds,1
 	li		$idx,16

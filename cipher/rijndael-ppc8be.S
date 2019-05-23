@@ -280,7 +280,6 @@ aes_p8_set_encrypt_key:
 	stvx	2,0,3
 	li	6,0
 	mtspr	256,12
-	stw	8,0(5)
 
 .Lenc_key_abort:
 	mr	3,6
@@ -354,7 +353,7 @@ aes_p8_encrypt:
 .previous
 .align	5
 .aes_p8_encrypt:
-	lwz	6,240(5)
+	lwz	6,480(5)
 	lis	0,0xfc00
 	mfspr	12,256
 	li	7,15
@@ -522,7 +521,7 @@ aes_p8_cbc_encrypt:
 
 	neg	11,3
 	lvsl	10,0,6
-	lwz	9,240(6)
+	lwz	9,480(6)
 
 	lvsr	6,0,11
 	lvx	5,0,3
@@ -1265,7 +1264,7 @@ aes_p8_ctr32_encrypt_blocks:
 
 	neg	11,3
 	lvsl	10,0,6
-	lwz	9,240(6)
+	lwz	9,480(6)
 
 	lvsr	6,0,11
 	lvx	5,0,3
@@ -1910,7 +1909,7 @@ aes_p8_xts_encrypt:
 	beq	.Lxts_enc_no_key2
 
 	lvsl	7,0,7
-	lwz	9,240(7)
+	lwz	9,480(7)
 	srwi	9,9,1
 	subi	9,9,1
 	li	3,16
@@ -1954,7 +1953,7 @@ aes_p8_xts_encrypt:
 	addi	10,10,16
 
 	lvsl	7,0,6
-	lwz	9,240(6)
+	lwz	9,480(6)
 	srwi	9,9,1
 	subi	9,9,1
 	li	3,16

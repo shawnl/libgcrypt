@@ -681,6 +681,14 @@ AC_ARG_ENABLE(arm-crypto-support,
 	      armcryptosupport=$enableval,armcryptosupport=yes)
 AC_MSG_RESULT($armcryptosupport)
 
+# Implementation of the --disable-ppc-crypto-support switch.
+AC_MSG_CHECKING([whether PPC crypto support is requested])
+AC_ARG_ENABLE(ppc-crypto-support,
+              AC_HELP_STRING([--disable-ppc-crypto-support],
+                 [Disable support for the PPC crypto instructions introduced in POWER 8 (PowerISA 2.07)]),
+              ppccryptosupport=$enableval,ppccryptosupport=yes)
+AC_MSG_RESULT($ppccryptosupport)
+
 # Implementation of the --disable-O-flag-munging switch.
 AC_MSG_CHECKING([whether a -O flag munging is requested])
 AC_ARG_ENABLE([O-flag-munging],
@@ -1272,14 +1280,14 @@ if test "$mpi_cpu_arch" != "x86" ; then
    drngsupport="n/a"
 fi
 
-if test "$mpi_cpu_arch" != "arm" ; then
-   if test "$mpi_cpu_arch" != "aarch64" ; then
-     neonsupport="n/a"
-     armcryptosupport="n/a"
-   fi
+if test "$mpi_cpu_arch" != "arm" && test "$mpi_cpu_arch" != "aarch64"; then
+   neonsupport="n/a"
+   armcryptosupport="n/a"
 fi
 
-
+if test "$mpi_cpu_arch" != "ppc"; then
+   ppccryptosupport="n/a"
+fi
 #############################################
 ####                                     ####
 #### Platform specific compiler checks.  ####
@@ -2119,6 +2127,10 @@ if test x"$armcryptosupport" = xyes ; then
   AC_DEFINE(ENABLE_ARM_CRYPTO_SUPPORT,1,
             [Enable support for ARMv8 Crypto Extension instructions.])
 fi
+if test x"$ppccryptosupport" = xyes ; then
+  AC_DEFINE(ENABLE_PPC_CRYPTO_SUPPORT,1,
+            [Enable support for POWER 8 (PowerISA 2.07) crypto extension.])
+fi
 if test x"$jentsupport" = xyes ; then
   AC_DEFINE(ENABLE_JENT_SUPPORT, 1,
             [Enable support for the jitter entropy collector.])
@@ -2225,6 +2237,20 @@ if test "$found" = "1" ; then
          # Build with the ARMv8/AArch64 CE implementation
          GCRYPT_CIPHERS="$GCRYPT_CIPHERS rijndael-armv8-ce.lo"
          GCRYPT_CIPHERS="$GCRYPT_CIPHERS rijndael-armv8-aarch64-ce.lo"
+      ;;
+      powerpc64le-*-*)
+         # Build with the crypto extension implementation
+         GCRYPT_CIPHERS="$GCRYPT_CIPHERS rijndael-ppc8.lo"
+      ;;
+      powerpc64-*-*)
+         # Big-Endian.
+         # Build with the crypto extension implementation
+         GCRYPT_CIPHERS="$GCRYPT_CIPHERS rijndael-ppc8be.lo"
+      ;;
+      powerpc-*-*)
+         # Big-Endian.
+         # Build with the crypto extension implementation
+         GCRYPT_CIPHERS="$GCRYPT_CIPHERS rijndael-ppc832.lo"
       ;;
    esac
 
@@ -2699,6 +2725,7 @@ case "$mpi_cpu_arch" in
         ;;
      ppc)
         AC_DEFINE(HAVE_CPU_ARCH_PPC, 1,   [Defined for PPC platforms])
+        GCRYPT_HWF_MODULES="libgcrypt_la-hwf-ppc.lo"
         ;;
      arm)
         AC_DEFINE(HAVE_CPU_ARCH_ARM, 1,   [Defined for ARM platforms])
@@ -2800,6 +2827,7 @@ GCRY_MSG_SHOW([Try using Intel AVX:      ],[$avxsupport])
 GCRY_MSG_SHOW([Try using Intel AVX2:     ],[$avx2support])
 GCRY_MSG_SHOW([Try using ARM NEON:       ],[$neonsupport])
 GCRY_MSG_SHOW([Try using ARMv8 crypto:   ],[$armcryptosupport])
+GCRY_MSG_SHOW([Try using PPC crypto:     ],[$ppccryptosupport])
 GCRY_MSG_SHOW([],[])
 
 if test "x${gpg_config_script_warn}" != x; then

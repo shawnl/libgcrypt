@@ -199,6 +199,37 @@ extern void _gcry_aes_armv8_ce_xts_crypt (void *context, unsigned char *tweak,
                                           size_t nblocks, int encrypt);
 #endif /*USE_ARM_ASM*/
 
+#ifdef USE_PPC_ASM
+/* POWER 8 AES extensions */
+extern void aes_p8_encrypt (const unsigned char *in,
+                            unsigned char *out,
+                            const RIJNDAEL_context *ctx);
+static unsigned int _gcry_aes_ppc8_encrypt (const RIJNDAEL_context *ctx,
+                                            unsigned char *out,
+                                            const unsigned char *in)
+{
+  /* When I tried to switch these registers in the assembly it broke. */
+  aes_p8_encrypt (in, out, ctx);
+  return 0; /* does not use stack */
+}
+                                  /* this is the decryption key part of context */
+extern void aes_p8_decrypt (const unsigned char *in,
+                            unsigned char *out,
+                            const void *sboxes);
+static unsigned int _gcry_aes_ppc8_decrypt (const RIJNDAEL_context *ctx,
+                                            unsigned char *out,
+                                            const unsigned char *in)
+{
+  aes_p8_decrypt (in, out, &ctx->u2);
+  return 0; /* does not use stack */
+}
+extern int aes_p8_set_encrypt_key (const unsigned char *userKey, const int bits,
+                                   RIJNDAEL_context *key);
+extern int aes_p8_set_decrypt_key (const unsigned char *userKey, const int bits,
+                                   /* this is the decryption key part of context */
+                                   const unsigned (*)[15][4]);
+#endif /*USE_PPC_ASM*/
+
 static unsigned int do_encrypt (const RIJNDAEL_context *ctx, unsigned char *bx,
                                 const unsigned char *ax);
 static unsigned int do_decrypt (const RIJNDAEL_context *ctx, unsigned char *bx,
@@ -280,7 +311,7 @@ do_setkey (RIJNDAEL_context *ctx, const byte *key, const unsigned keylen,
   int i,j, r, t, rconpointer = 0;
   int KC;
 #if defined(USE_AESNI) || defined(USE_PADLOCK) || defined(USE_SSSE3) \
-    || defined(USE_ARM_CE)
+    || defined(USE_ARM_CE) || defined(USE_PPC_ASM)
   unsigned int hwfeatures;
 #endif
 
@@ -324,7 +355,7 @@ do_setkey (RIJNDAEL_context *ctx, const byte *key, const unsigned keylen,
   ctx->rounds = rounds;
 
 #if defined(USE_AESNI) || defined(USE_PADLOCK) || defined(USE_SSSE3) \
-    || defined(USE_ARM_CE)
+    || defined(USE_ARM_CE) || defined(USE_PPC_ASM)
   hwfeatures = _gcry_get_hw_features ();
 #endif
 
@@ -340,6 +371,9 @@ do_setkey (RIJNDAEL_context *ctx, const byte *key, const unsigned keylen,
 #endif
 #ifdef USE_ARM_CE
   ctx->use_arm_ce = 0;
+#endif
+#ifdef USE_PPC_ASM
+  ctx->use_ppc_asm = 0;
 #endif
 
   if (0)
@@ -421,6 +455,16 @@ do_setkey (RIJNDAEL_context *ctx, const byte *key, const unsigned keylen,
         }
     }
 #endif
+#ifdef USE_PPC_ASM
+  else if (hwfeatures & HWF_PPC_VCRYPTO)
+    {
+      ctx->encrypt_fn = _gcry_aes_ppc8_encrypt;
+      ctx->decrypt_fn = _gcry_aes_ppc8_decrypt;
+      ctx->prefetch_enc_fn = NULL;
+      ctx->prefetch_dec_fn = NULL;
+      ctx->use_ppc_asm = 1;
+    }
+#endif
   else
     {
       ctx->encrypt_fn = do_encrypt;
@@ -446,6 +490,15 @@ do_setkey (RIJNDAEL_context *ctx, const byte *key, const unsigned keylen,
 #ifdef USE_ARM_CE
   else if (ctx->use_arm_ce)
     _gcry_aes_armv8_ce_setkey (ctx, key);
+#endif
+#ifdef USE_PPC_ASM
+  else if (ctx->use_ppc_asm)
+    {
+      /* These are both done here to avoid having to store the key.
+       * Does not require in-memory S-boxes. */
+      aes_p8_set_encrypt_key (key, keylen * 8, ctx);
+      aes_p8_set_decrypt_key (key, keylen * 8, &ctx->keyschdec32);
+    }
 #endif
   else
     {
@@ -591,6 +644,13 @@ prepare_decryption( RIJNDAEL_context *ctx )
       /* Padlock does not need decryption subkeys. */
     }
 #endif /*USE_PADLOCK*/
+#ifdef USE_PPC_ASM
+  else if (ctx->use_ppc_asm)
+    {
+      /* done during encryption key setup, as then we have the actual
+       * key available */
+    }
+#endif /*USE_PPC_ASM*/
   else
     {
       const byte *sbox = ((const byte *)encT) + 1;
@@ -865,7 +925,6 @@ _gcry_aes_cfb_enc (void *context, unsigned char *iv,
   if (burn_depth)
     _gcry_burn_stack (burn_depth + 4 * sizeof(void *));
 }
-
 
 /* Bulk encryption of complete blocks in CBC mode.  Caller needs to
    make sure that IV is aligned on an unsigned long boundary.  This
@@ -1150,7 +1209,7 @@ do_decrypt (const RIJNDAEL_context *ctx, unsigned char *bx,
 				     dec_tables.T);
 #else
   return do_decrypt_fn (ctx, bx, ax);
-#endif /*!USE_ARM_ASM && !USE_AMD64_ASM*/
+#endif
 }
 
 
@@ -1588,14 +1647,21 @@ selftest_basic_128 (void)
     {
       0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,
       0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f
-      /* 0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6, */
-      /* 0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f, 0x3c */
     };
   static const unsigned char ciphertext_128[16] =
     {
       0x69,0xc4,0xe0,0xd8,0x6a,0x7b,0x04,0x30,
       0xd8,0xcd,0xb7,0x80,0x70,0xb4,0xc5,0x5a
     };
+
+  static const unsigned char key_test_expansion_128[16] =
+    {
+      0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6,
+      0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f, 0x3c
+    };
+
+  RIJNDAEL_context exp_ctx;
+  rijndael_setkey (&exp_ctx, key_test_expansion_128, sizeof (key_128), NULL);
 #endif
 
   /* Because gcc/ld can only align the CTX struct on 8 bytes on the
@@ -1611,7 +1677,7 @@ selftest_basic_128 (void)
       xfree (ctxmem);
       return "AES-128 test encryption failed.";
     }
-  rijndael_decrypt (ctx, scratch, scratch);
+  rijndael_decrypt (ctx, scratch, ciphertext_128);
   xfree (ctxmem);
   if (memcmp (scratch, plaintext_128, sizeof (plaintext_128)))
     return "AES-128 test decryption failed.";

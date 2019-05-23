@@ -104,6 +104,13 @@
 # endif
 #endif /* ENABLE_ARM_CRYPTO_SUPPORT */
 
+#undef USE_PPC_ASM
+#ifdef ENABLE_PPC_CRYPTO_SUPPORT
+# if defined(__powerpc64__) || defined(__powerpc__)
+#   define USE_PPC_ASM 1
+# endif
+#endif
+
 struct RIJNDAEL_context_s;
 
 typedef unsigned int (*rijndael_cryptfn_t)(const struct RIJNDAEL_context_s *ctx,
@@ -154,6 +161,9 @@ typedef struct RIJNDAEL_context_s
 #ifdef USE_ARM_CE
   unsigned int use_arm_ce:1;          /* ARMv8 CE shall be used.  */
 #endif /*USE_ARM_CE*/
+#ifdef USE_PPC_ASM
+  unsigned int use_ppc_asm:1;          /* PowerISA 2.07 crypto shall be used.  */
+#endif
   rijndael_cryptfn_t encrypt_fn;
   rijndael_cryptfn_t decrypt_fn;
   rijndael_prefetchfn_t prefetch_enc_fn;
