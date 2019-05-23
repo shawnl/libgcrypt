@@ -45,81 +45,20 @@
 #include "bufhelp.h"
 #include "cipher.h"
 #include "hash-common.h"
+#include "sha2-common.h"
 
-
-/* USE_SSSE3 indicates whether to compile with Intel SSSE3 code. */
-#undef USE_SSSE3
-#if defined(__x86_64__) && defined(HAVE_GCC_INLINE_ASM_SSSE3) && \
-    defined(HAVE_INTEL_SYNTAX_PLATFORM_AS) && \
-    (defined(HAVE_COMPATIBLE_GCC_AMD64_PLATFORM_AS) || \
-     defined(HAVE_COMPATIBLE_GCC_WIN64_PLATFORM_AS))
-# define USE_SSSE3 1
+/* Helper macro to force alignment to 16 bytes.  */
+#ifdef HAVE_GCC_ATTRIBUTE_ALIGNED
+# define ATTR_ALIGNED_16  __attribute__ ((aligned (16)))
+#else
+# define ATTR_ALIGNED_16
 #endif
-
-/* USE_AVX indicates whether to compile with Intel AVX code. */
-#undef USE_AVX
-#if defined(__x86_64__) && defined(HAVE_GCC_INLINE_ASM_AVX) && \
-    defined(HAVE_INTEL_SYNTAX_PLATFORM_AS) && \
-    (defined(HAVE_COMPATIBLE_GCC_AMD64_PLATFORM_AS) || \
-     defined(HAVE_COMPATIBLE_GCC_WIN64_PLATFORM_AS))
-# define USE_AVX 1
-#endif
-
-/* USE_AVX2 indicates whether to compile with Intel AVX2/BMI2 code. */
-#undef USE_AVX2
-#if defined(__x86_64__) && defined(HAVE_GCC_INLINE_ASM_AVX2) && \
-    defined(HAVE_GCC_INLINE_ASM_BMI2) && \
-    defined(HAVE_INTEL_SYNTAX_PLATFORM_AS) && \
-    (defined(HAVE_COMPATIBLE_GCC_AMD64_PLATFORM_AS) || \
-     defined(HAVE_COMPATIBLE_GCC_WIN64_PLATFORM_AS))
-# define USE_AVX2 1
-#endif
-
-/* USE_SHAEXT indicates whether to compile with Intel SHA Extension code. */
-#undef USE_SHAEXT
-#if defined(HAVE_GCC_INLINE_ASM_SHAEXT) && \
-    defined(HAVE_GCC_INLINE_ASM_SSE41) && \
-    defined(ENABLE_SHAEXT_SUPPORT)
-# define USE_SHAEXT 1
-#endif
-
-/* USE_ARM_CE indicates whether to enable ARMv8 Crypto Extension assembly
- * code. */
-#undef USE_ARM_CE
-#ifdef ENABLE_ARM_CRYPTO_SUPPORT
-# if defined(HAVE_ARM_ARCH_V6) && defined(__ARMEL__) \
-     && defined(HAVE_COMPATIBLE_GCC_ARM_PLATFORM_AS) \
-     && defined(HAVE_GCC_INLINE_ASM_AARCH32_CRYPTO)
-#  define USE_ARM_CE 1
-# elif defined(__AARCH64EL__) \
-       && defined(HAVE_COMPATIBLE_GCC_AARCH64_PLATFORM_AS) \
-       && defined(HAVE_GCC_INLINE_ASM_AARCH64_CRYPTO)
-#  define USE_ARM_CE 1
-# endif
-#endif
-
 
 typedef struct {
   gcry_md_block_ctx_t bctx;
-  u32  h0,h1,h2,h3,h4,h5,h6,h7;
+  u32 h0 ATTR_ALIGNED_16;
+  u32 h1,h2,h3,h4,h5,h6,h7;
 } SHA256_CONTEXT;
-
-
-/* Assembly implementations use SystemV ABI, ABI conversion and additional
- * stack to store XMM6-XMM15 needed on Win64. */
-#undef ASM_FUNC_ABI
-#undef ASM_EXTRA_STACK
-#if defined(USE_SSSE3) || defined(USE_AVX) || defined(USE_AVX2) || \
-    defined(USE_SHAEXT)
-# ifdef HAVE_COMPATIBLE_GCC_WIN64_PLATFORM_AS
-#  define ASM_FUNC_ABI __attribute__((sysv_abi))
-#  define ASM_EXTRA_STACK (10 * 16 + sizeof(void *) * 4)
-# else
-#  define ASM_FUNC_ABI
-#  define ASM_EXTRA_STACK 0
-# endif
-#endif
-
 
 #ifdef USE_SSSE3
 unsigned int _gcry_sha256_transform_amd64_ssse3(const void *input_data,
@@ -196,16 +135,68 @@ do_sha256_transform_armv8_ce(void *ctx, const unsigned char *data,
 }
 #endif
 
+#ifdef USE_PPC_ASM
+void sha256_block_p8 (u32 state[8],
+                      const unsigned char *data,
+                      size_t len);
+static unsigned int
+do_sha256_transform_ppc8 (void *ctx, const unsigned char *data,
+                          size_t nblks)
+{
+  SHA256_CONTEXT *hd = ctx;
+  sha256_block_p8 (&hd->h0, data, nblks);
+  return 128; /* uses 128 bytes of stack space */
+}
+#endif
 
 static unsigned int
 do_transform_generic (void *ctx, const unsigned char *data, size_t nblks);
 
+static void
+sha256_init_common (void *context, unsigned int flags)
+{
+  SHA256_CONTEXT *hd = context;
+  unsigned int features = _gcry_get_hw_features ();
+
+  (void)flags;
+
+  /* Order of feature checks is important here; last match will be
+   * selected.  Keep slower implementations at the top and faster at
+   * the bottom.  */
+  hd->bctx.bwrite = do_transform_generic;
+#ifdef USE_SSSE3
+  if ((features & HWF_INTEL_SSSE3) != 0)
+    hd->bctx.bwrite = do_sha256_transform_amd64_ssse3;
+#endif
+#ifdef USE_AVX
+  /* AVX implementation uses SHLD which is known to be slow on non-Intel CPUs.
+   * Therefore use this implementation on Intel CPUs only. */
+  if ((features & HWF_INTEL_AVX) && (features & HWF_INTEL_FAST_SHLD))
+    hd->bctx.bwrite = do_sha256_transform_amd64_avx;
+#endif
+#ifdef USE_AVX2
+  if ((features & HWF_INTEL_AVX2) && (features & HWF_INTEL_BMI2))
+    hd->bctx.bwrite = do_sha256_transform_amd64_avx2;
+#endif
+#ifdef USE_SHAEXT
+  if ((features & HWF_INTEL_SHAEXT) && (features & HWF_INTEL_SSE4_1))
+    hd->bctx.bwrite = do_sha256_transform_intel_shaext;
+#endif
+#ifdef USE_ARM_CE
+  if ((features & HWF_ARM_SHA2) != 0)
+    hd->bctx.bwrite = do_sha256_transform_armv8_ce;
+#endif
+#ifdef USE_PPC_ASM
+  if ((features & HWF_PPC_VCRYPTO) != 0)
+    hd->bctx.bwrite = do_sha256_transform_ppc8;
+#endif
+  (void)features;
+}
 
 static void
 sha256_init (void *context, unsigned int flags)
 {
   SHA256_CONTEXT *hd = context;
-  unsigned int features = _gcry_get_hw_features ();
 
   (void)flags;
 
@@ -223,33 +214,7 @@ sha256_init (void *context, unsigned int flags)
   hd->bctx.count = 0;
   hd->bctx.blocksize = 64;
 
-  /* Order of feature checks is important here; last match will be
-   * selected.  Keep slower implementations at the top and faster at
-   * the bottom.  */
-  hd->bctx.bwrite = do_transform_generic;
-#ifdef USE_SSSE3
-  if ((features & HWF_INTEL_SSSE3) != 0)
-    hd->bctx.bwrite = do_sha256_transform_amd64_ssse3;
-#endif
-#ifdef USE_AVX
-  /* AVX implementation uses SHLD which is known to be slow on non-Intel CPUs.
-   * Therefore use this implementation on Intel CPUs only. */
-  if ((features & HWF_INTEL_AVX) && (features & HWF_INTEL_FAST_SHLD))
-    hd->bctx.bwrite = do_sha256_transform_amd64_avx;
-#endif
-#ifdef USE_AVX2
-  if ((features & HWF_INTEL_AVX2) && (features & HWF_INTEL_BMI2))
-    hd->bctx.bwrite = do_sha256_transform_amd64_avx2;
-#endif
-#ifdef USE_SHAEXT
-  if ((features & HWF_INTEL_SHAEXT) && (features & HWF_INTEL_SSE4_1))
-    hd->bctx.bwrite = do_sha256_transform_intel_shaext;
-#endif
-#ifdef USE_ARM_CE
-  if ((features & HWF_ARM_SHA2) != 0)
-    hd->bctx.bwrite = do_sha256_transform_armv8_ce;
-#endif
-  (void)features;
+  sha256_init_common (context, flags);
 }
 
 
@@ -257,7 +222,6 @@ static void
 sha224_init (void *context, unsigned int flags)
 {
   SHA256_CONTEXT *hd = context;
-  unsigned int features = _gcry_get_hw_features ();
 
   (void)flags;
 
@@ -275,33 +239,7 @@ sha224_init (void *context, unsigned int flags)
   hd->bctx.count = 0;
   hd->bctx.blocksize = 64;
 
-  /* Order of feature checks is important here; last match will be
-   * selected.  Keep slower implementations at the top and faster at
-   * the bottom.  */
-  hd->bctx.bwrite = do_transform_generic;
-#ifdef USE_SSSE3
-  if ((features & HWF_INTEL_SSSE3) != 0)
-    hd->bctx.bwrite = do_sha256_transform_amd64_ssse3;
-#endif
-#ifdef USE_AVX
-  /* AVX implementation uses SHLD which is known to be slow on non-Intel CPUs.
-   * Therefore use this implementation on Intel CPUs only. */
-  if ((features & HWF_INTEL_AVX) && (features & HWF_INTEL_FAST_SHLD))
-    hd->bctx.bwrite = do_sha256_transform_amd64_avx;
-#endif
-#ifdef USE_AVX2
-  if ((features & HWF_INTEL_AVX2) && (features & HWF_INTEL_BMI2))
-    hd->bctx.bwrite = do_sha256_transform_amd64_avx2;
-#endif
-#ifdef USE_SHAEXT
-  if ((features & HWF_INTEL_SHAEXT) && (features & HWF_INTEL_SSE4_1))
-    hd->bctx.bwrite = do_sha256_transform_intel_shaext;
-#endif
-#ifdef USE_ARM_CE
-  if ((features & HWF_ARM_SHA2) != 0)
-    hd->bctx.bwrite = do_sha256_transform_armv8_ce;
-#endif
-  (void)features;
+  sha256_init_common (context, flags);
 }
 
 

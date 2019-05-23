@@ -1,5 +1,7 @@
 #! /usr/bin/env perl
 # SPDX-License-Identifier: BSD-3-Clause
+#
+#Changes: rename ppc-xlate.pl
 
 # ====================================================================
 # Written by Andy Polyakov <appro@openssl.org> for the OpenSSL
@@ -54,6 +56,7 @@ if ($flavour =~ /64/) {
 $LENDIAN=($flavour=~/le/);
 
 $0 =~ m/(.*[\/\\])[^\/\\]+$/; $dir=$1;
+( $xlate="${dir}asm-common-ppc.pl" and -f $xlate ) or
 ( $xlate="${dir}ppc-xlate.pl" and -f $xlate ) or
 ( $xlate="${dir}../../perlasm/ppc-xlate.pl" and -f $xlate) or
 die "can't locate ppc-xlate.pl";

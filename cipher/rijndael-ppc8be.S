@@ -521,7 +521,6 @@ aes_p8_cbc_encrypt:
 
 	neg	11,3
 	lvsl	10,0,6
-	lwz	9,480(6)
 
 	lvsr	6,0,11
 	lvx	5,0,3

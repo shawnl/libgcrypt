@@ -53,55 +53,7 @@
 #include "bufhelp.h"
 #include "cipher.h"
 #include "hash-common.h"
-
-
-/* USE_ARM_NEON_ASM indicates whether to enable ARM NEON assembly code. */
-#undef USE_ARM_NEON_ASM
-#ifdef ENABLE_NEON_SUPPORT
-# if defined(HAVE_ARM_ARCH_V6) && defined(__ARMEL__) \
-     && defined(HAVE_COMPATIBLE_GCC_ARM_PLATFORM_AS) \
-     && defined(HAVE_GCC_INLINE_ASM_NEON)
-#  define USE_ARM_NEON_ASM 1
-# endif
-#endif /*ENABLE_NEON_SUPPORT*/
-
-
-/* USE_ARM_ASM indicates whether to enable ARM assembly code. */
-#undef USE_ARM_ASM
-#if defined(__ARMEL__) && defined(HAVE_COMPATIBLE_GCC_ARM_PLATFORM_AS)
-# define USE_ARM_ASM 1
-#endif
-
-
-/* USE_SSSE3 indicates whether to compile with Intel SSSE3 code. */
-#undef USE_SSSE3
-#if defined(__x86_64__) && defined(HAVE_GCC_INLINE_ASM_SSSE3) && \
-    defined(HAVE_INTEL_SYNTAX_PLATFORM_AS) && \
-    (defined(HAVE_COMPATIBLE_GCC_AMD64_PLATFORM_AS) || \
-     defined(HAVE_COMPATIBLE_GCC_WIN64_PLATFORM_AS))
-# define USE_SSSE3 1
-#endif
-
-
-/* USE_AVX indicates whether to compile with Intel AVX code. */
-#undef USE_AVX
-#if defined(__x86_64__) && defined(HAVE_GCC_INLINE_ASM_AVX) && \
-    defined(HAVE_INTEL_SYNTAX_PLATFORM_AS) && \
-    (defined(HAVE_COMPATIBLE_GCC_AMD64_PLATFORM_AS) || \
-     defined(HAVE_COMPATIBLE_GCC_WIN64_PLATFORM_AS))
-# define USE_AVX 1
-#endif
-
-
-/* USE_AVX2 indicates whether to compile with Intel AVX2/rorx code. */
-#undef USE_AVX2
-#if defined(__x86_64__) && defined(HAVE_GCC_INLINE_ASM_AVX2) && \
-    defined(HAVE_GCC_INLINE_ASM_BMI2) && \
-    defined(HAVE_INTEL_SYNTAX_PLATFORM_AS) && \
-    (defined(HAVE_COMPATIBLE_GCC_AMD64_PLATFORM_AS) || \
-     defined(HAVE_COMPATIBLE_GCC_WIN64_PLATFORM_AS))
-# define USE_AVX2 1
-#endif
+#include "sha2-common.h"
 
 
 typedef struct
@@ -160,22 +112,6 @@ static const u64 k[] =
     U64_C(0x5fcb6fab3ad6faec), U64_C(0x6c44198c4a475817)
   };
 
-
-/* AMD64 assembly implementations use SystemV ABI, ABI conversion and additional
- * stack to store XMM6-XMM15 needed on Win64. */
-#undef ASM_FUNC_ABI
-#undef ASM_EXTRA_STACK
-#if defined(USE_SSSE3) || defined(USE_AVX) || defined(USE_AVX2)
-# ifdef HAVE_COMPATIBLE_GCC_WIN64_PLATFORM_AS
-#  define ASM_FUNC_ABI __attribute__((sysv_abi))
-#  define ASM_EXTRA_STACK (10 * 16 + 4 * sizeof(void *))
-# else
-#  define ASM_FUNC_ABI
-#  define ASM_EXTRA_STACK 0
-# endif
-#endif
-
-
 #ifdef USE_ARM_NEON_ASM
 unsigned int _gcry_sha512_transform_armv7_neon (SHA512_STATE *hd,
                                                 const unsigned char *data,
@@ -187,6 +123,20 @@ do_sha512_transform_armv7_neon(void *ctx, const unsigned char *data,
 {
   SHA512_CONTEXT *hd = ctx;
   return _gcry_sha512_transform_armv7_neon (&hd->state, data, k, nblks);
+}
+#endif
+
+#ifdef USE_PPC_ASM
+void sha512_block_p8 (SHA512_STATE *hd,
+                      const unsigned char *data,
+                      size_t len);
+static unsigned int
+do_sha512_transform_ppc8 (void *ctx, const unsigned char *data,
+                          size_t nblks)
+{
+  SHA512_CONTEXT *hd = ctx;
+  sha512_block_p8 (&hd->state, data, nblks);
+  return 128; /* uses 128 bytes of stack space */
 }
 #endif
 
@@ -273,6 +223,10 @@ sha512_init_common (SHA512_CONTEXT *ctx, unsigned int flags)
 #ifdef USE_ARM_NEON_ASM
   if ((features & HWF_ARM_NEON) != 0)
     ctx->bctx.bwrite = do_sha512_transform_armv7_neon;
+#endif
+#ifdef USE_PPC_ASM
+  if ((features & HWF_PPC_VCRYPTO) != 0)
+    ctx->bctx.bwrite = do_sha512_transform_ppc8;
 #endif
 #ifdef USE_SSSE3
   if ((features & HWF_INTEL_SSSE3) != 0)
