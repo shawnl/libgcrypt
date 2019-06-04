@@ -8462,9 +8462,9 @@ check_one_cipher_core (int algo, int mode, int flags,
   unsigned int pos;
   unsigned int taglen;
 
-  in_buffer = malloc (nplain + 1);
-  out_buffer = malloc (nplain + 1);
-  enc_result = malloc (nplain);
+  in_buffer = malloc (nplain + 17);
+  out_buffer = malloc (nplain + 17);
+  enc_result = malloc (nplain + 17);
   if (!in_buffer || !out_buffer || !enc_result)
     {
       fail ("pass %d, algo %d, mode %d, malloc failed\n",

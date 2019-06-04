@@ -53,7 +53,7 @@ poly1305mac_open (gcry_mac_hd_t h)
   if (secure)
     mac_ctx = xtrycalloc_secure (1, sizeof(*mac_ctx));
   else
-    mac_ctx = xtrycalloc (1, sizeof(*mac_ctx));
+    mac_ctx = xtrycalloc (1, sizeof(*mac_ctx)*2);
 
   if (!mac_ctx)
     return gpg_err_code_from_syserror ();
