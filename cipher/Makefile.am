@@ -101,6 +101,7 @@ EXTRA_libcipher_la_SOURCES = \
 	rijndael-ppc8be.S \
 	rijndael-ppc832.S \
 	rmd160.c \
+	rijndael-ppc.c \
 	rsa.c \
 	salsa20.c salsa20-amd64.S salsa20-armv7-neon.S \
 	scrypt.c \
@@ -167,6 +168,13 @@ instrumentation_munging = sed \
 else
 instrumentation_munging = cat
 endif
+
+# So what works in glibc's makefiles, doesn't work in automake....
+rijndael-ppc.lo: $(srcdir)/rijndael-ppc.c Makefile
+	`echo $(COMPILE) -mabi=altivec -maltivec -mvsx -mpower8-vector -c $< | $(instrumentation_munging) `
+
+rijndael-ppc.lo: $(srcdir)/rijndael-ppc.c Makefile
+	`echo $(LTCOMPILE) -mabi=altivec -maltivec -mvsx -mpower8-vector -c $< | $(instrumentation_munging) `
 
 rijndael-aesni.o: $(srcdir)/rijndael-aesni.c Makefile
 	`echo $(COMPILE) -c $< | $(instrumentation_munging) `

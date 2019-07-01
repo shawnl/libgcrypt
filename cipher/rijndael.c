@@ -200,29 +200,7 @@ extern void _gcry_aes_armv8_ce_xts_crypt (void *context, unsigned char *tweak,
 #endif /*USE_ARM_ASM*/
 
 #ifdef USE_PPC_ASM
-/* POWER 8 AES extensions */
-extern void aes_p8_encrypt (const unsigned char *in,
-                            unsigned char *out,
-                            const RIJNDAEL_context *ctx);
-static unsigned int _gcry_aes_ppc8_encrypt (const RIJNDAEL_context *ctx,
-                                            unsigned char *out,
-                                            const unsigned char *in)
-{
-  /* When I tried to switch these registers in the assembly it broke. */
-  aes_p8_encrypt (in, out, ctx);
-  return 0; /* does not use stack */
-}
-                                  /* this is the decryption key part of context */
-extern void aes_p8_decrypt (const unsigned char *in,
-                            unsigned char *out,
-                            const void *sboxes);
-static unsigned int _gcry_aes_ppc8_decrypt (const RIJNDAEL_context *ctx,
-                                            unsigned char *out,
-                                            const unsigned char *in)
-{
-  aes_p8_decrypt (in, out, &ctx->u2);
-  return 0; /* does not use stack */
-}
+#include "rijndael-ppc.h"
 extern int aes_p8_set_encrypt_key (const unsigned char *userKey, const int bits,
                                    RIJNDAEL_context *key);
 extern int aes_p8_set_decrypt_key (const unsigned char *userKey, const int bits,
@@ -297,7 +275,7 @@ static void _gcry_aes_ppc8_ctr_enc (void *context, unsigned char *ctr,
   const RIJNDAEL_context *ctx = context;
   const uint64_t two32 = 1ULL << 32;
   int overflow;
-  u64 s[2], e[2];
+  u64 s[2];
   s[0] = buf_get_be64(ctr + 8);
   overflow = two32 - (s[0] % two32) < nblocks;
 #ifdef __builtin_expect
@@ -566,6 +544,7 @@ do_setkey (RIJNDAEL_context *ctx, const byte *key, const unsigned keylen,
         hd->bulk.cbc_enc = _gcry_aes_ppc8_cbc_enc;
         hd->bulk.xts_crypt = _gcry_aes_ppc8_xts_crypt;
         hd->bulk.ctr_enc = _gcry_aes_ppc8_ctr_enc;
+        hd->bulk.ocb_crypt = _gcry_aes_ppc8_ocb_crypt;
       }
     }
 #endif
@@ -1541,6 +1520,12 @@ _gcry_aes_ocb_crypt (gcry_cipher_hd_t c, void *outbuf_arg,
       return _gcry_aes_armv8_ce_ocb_crypt (c, outbuf, inbuf, nblocks, encrypt);
     }
 #endif /*USE_ARM_CE*/
+#ifdef USE_PPC_ASM
+  else if (ctx->use_ppc_asm)
+    {
+      return _gcry_aes_ppc8_ocb_crypt (c, outbuf, inbuf, nblocks, encrypt);
+    }
+#endif /*USE_PPC_ASM*/
   else if (encrypt)
     {
       union { unsigned char x1[16] ATTR_ALIGNED_16; u32 x32[4]; } l_tmp;

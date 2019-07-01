@@ -2242,18 +2242,21 @@ if test "$found" = "1" ; then
          # Build with the crypto extension implementation
          GCRYPT_CIPHERS="$GCRYPT_CIPHERS rijndael-ppc8.lo"
          GCRYPT_CIPHERS="$GCRYPT_CIPHERS sha512-ppc8.lo sha256-ppc8.lo"
+         GCRYPT_CIPHERS="$GCRYPT_CIPHERS rijndael-ppc.lo"
       ;;
       powerpc64-*-*)
          # Big-Endian.
          # Build with the crypto extension implementation
          GCRYPT_CIPHERS="$GCRYPT_CIPHERS rijndael-ppc8be.lo"
          GCRYPT_CIPHERS="$GCRYPT_CIPHERS sha512-ppc8be.lo sha256-ppc8be.lo"
+         GCRYPT_CIPHERS="$GCRYPT_CIPHERS rijndael-ppc.lo"
       ;;
       powerpc-*-*)
          # Big-Endian.
          # Build with the crypto extension implementation
          GCRYPT_CIPHERS="$GCRYPT_CIPHERS rijndael-ppc832.lo"
          GCRYPT_CIPHERS="$GCRYPT_CIPHERS sha512-ppc832.lo sha256-ppc832.lo"
+         GCRYPT_CIPHERS="$GCRYPT_CIPHERS rijndael-ppc.lo"
       ;;
    esac
 
