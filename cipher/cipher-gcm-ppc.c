@@ -115,26 +115,13 @@ vec_load_be(unsigned long offset, const unsigned char *ptr,
   return vec_vsx_ld (offset, ptr);
 #endif
 }
+
 /*
  Power ghash based on papers:
   "The Galois/Counter Mode of Operation (GCM)"; David A. McGrew, John Viega
   "Intel® Carry-Less Multiplication Instruction and its Usage for Computing the
    GCM Mode - Rev 2.01"; Shay Gueron, Michael E. Kounavis.
  */
-/*
-static ASM_FUNC_ATTR_INLINE vector1x_u128 gfmul_pclmul(vector1x_u128 a, vector1x_u128 b)
-{
-  vector2x_u64 zero = {0, 0};
-  vector2x_u64 lo_a = zero, hi_a = zero;
-  vector1x_u128 lo, mid, hi;
-  lo_a[0] = ((vector2x_u64)a)[0];
-  hi_a[0] = ((vector2x_u64)a)[1];
-  lo = asm_vpmsumd(lo_a, b); // do not need to mask b because 0 * anything -> 0
-  mid = asm_vpmsumd(a, b);
-  hi = asm_vpmsumd(hi_a, b);
-  reduction();
-}
-*/
 void ASM_FUNC_ATTR 
 __attribute__((optimize(0)))
 _gcry_ghash_setup_ppc_vpmsum (uint64_t *gcm_table, void *gcm_key)
@@ -143,9 +130,11 @@ _gcry_ghash_setup_ppc_vpmsum (uint64_t *gcm_table, void *gcm_key)
   volatile vector16x_u8 bswap_const = { 12, 13, 14, 15, 8, 9, 10, 11, 3, 4, 5, 6, 0, 1, 2, 3 };
   volatile vector1x_u128 H = VEC_LOAD_BE(gcm_key, bswap_const);
 
-  volatile vector16x_u8 c2, t0, t1, t2, most_sig_of_H;
-  volatile vector1x_u128 twisted_H, input;
+  volatile vector16x_u8 c2, t0, t1, t2, most_sig_of_H, t4, t5, t6;
+  volatile vector2x_u64 in, in1;
   volatile vector2x_u64 H_lo = zero8, H_hi = zero8;
+  volatile vector2x_u64 lo, mid, hi;
+  volatile vector2x_u64 H2_lo = zero8, H2, H2_hi = zero8;
 
   // This in a long sequence to create the following constant
   // { U64_C(0x0000000000000001), U64_C(0xc200000000000000) };
@@ -161,20 +150,49 @@ _gcry_ghash_setup_ppc_vpmsum (uint64_t *gcm_table, void *gcm_key)
   // rotate H
   t2 = vec_splat_u8(7);
   most_sig_of_H = vec_splat((vector16x_u8)H, 15);
-  twisted_H = H << (vector1x_u128)t1;
-  t1 = t1 >> t2;
-  t1 = t1 & c2;
-  input = twisted_H ^ (vector1x_u128)t1;
+  H = H << (vector1x_u128)t1;
+  most_sig_of_H = most_sig_of_H >> t2;
+  most_sig_of_H = most_sig_of_H & c2;
+  in = (vector2x_u64)(H ^ (vector1x_u128)most_sig_of_H);
 
-  twisted_H = (input << 64) | (input >> 64);
   c2 = (vector16x_u8)((vector1x_u128)c2 >> 64); // change mask to 00000000c2000000
-  H_lo[0] = ((vector2x_u64)twisted_H)[1];
-  H_hi[0] = ((vector2x_u64)twisted_H)[0];
+
+  H = (((vector1x_u128)in << 64) | ((vector1x_u128)in >> 64));
+  H_lo[0] = ((vector2x_u64)H)[1];
+  H_hi[0] = ((vector2x_u64)H)[0];
 
   STORE_TABLE(1, c2);
   STORE_TABLE(2, H_lo);
-  STORE_TABLE(3, twisted_H);
+  STORE_TABLE(3, H);
   STORE_TABLE(4, H_hi);
+
+  lo = asm_vpmsumd(H_lo, in); // do not need to mask in because 0 * anything -> 0
+  mid = asm_vpmsumd((vector2x_u64)H, in);
+  hi = asm_vpmsumd(H_hi, in);
+
+  // reduce 1
+  t2 = asm_vpmsumd(lo, (vector2x_u64)c2);
+
+  t0 = mid << 64;
+  t1 = mid >> 64;
+  lo ^= t0;
+  hi ^= t1;
+  lo = (vector1x_u128)lo << 64 | (vector1x_u128)lo >> 64;
+  lo ^= t2;
+
+  // reduce 2
+  t1 = (vector1x_u128)lo << 64 | (vector1x_u128)lo >> 64;
+  low = asm_vpmsumd(lo, t2);
+  t1 ^= hi;
+  in1 = lo ^ t1;
+
+  H2 = ((vector1x_u128)in1 << 64) | ((vector1x_u128)in1 >> 64);
+  H2_lo[0] = ((vector2x_u64)H2)[1];
+  H2_hi[0] = ((vector2x_u64)H2)[0];
+
+  STORE_TABLE(5, H2_lo);
+  STORE_TABLE(6, H2);
+  STORE_TABLE(7, H2_hi);
 
   abort();
 }
