@@ -96,6 +96,17 @@
 #endif
 #endif /* GCM_USE_ARM_NEON */
 
+/* GCM_USE_PPC_VPMSUM indicates whether to compile GCM with PPC Power 8 polynomial multiplication instruction */
+#undef GCM_USE_PPC_VPMSUM
+#if defined(GCM_USE_TABLES)
+#if defined(ENABLE_PPC_CRYPTO_SUPPORT) && defined(__powerpc__) && \
+    defined(HAVE_COMPATIBLE_CC_PPC_ALTIVEC) && \
+    defined(HAVE_GCC_INLINE_ASM_PPC_ALTIVEC) && \
+    __GNUC__ >= 4
+#  define GCM_USE_PPC_VPMSUM 1
+#endif
+#endif /* GCM_USE_PPC_VPMSUM */
+
 typedef unsigned int (*ghash_fn_t) (gcry_cipher_hd_t c, byte *result,
                                     const byte *buf, size_t nblocks);
 
