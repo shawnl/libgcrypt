@@ -306,10 +306,15 @@ _gcry_ghash_setup_ppc_vpmsum (volatile uint64_t *gcm_table, void *gcm_key)
 }
 
 unsigned int ASM_FUNC_ATTR
-_gcry_ghash_ppc_vpmsum (gcry_cipher_hd_t c, byte *result, const byte *buf,
-                          size_t nblocks)
+__attribute__((optimize(0)))
+_gcry_ghash_ppc_vpmsum (void *gcm_key, volatile byte *result, volatile const byte *buf,
+                          volatile size_t nblocks)
 {
-  return 0;
+  volatile vector16x_u8 c7;
+  volatile block c2;
+
+  c7 = vec_splat_u8(7);
+  c2 = vec_aligned_ld(0, gcm_key);
 }
 
 #endif /* GCM_USE_PPC_VPMSUM */
