@@ -178,34 +178,34 @@ vec_load_be(unsigned long offset, const unsigned char *ptr,
    GCM Mode - Rev 2.01"; Shay Gueron, Michael E. Kounavis.
  */
 void ASM_FUNC_ATTR 
-__attribute__((optimize(0)))
-_gcry_ghash_setup_ppc_vpmsum (volatile uint64_t *gcm_table, void *gcm_key)
+_gcry_ghash_setup_ppc_vpmsum (uint64_t *gcm_table, void *gcm_key)
 {
-  printf("%lx\n", gcm_table);
-  volatile vector2x_u64 zero8 = {0, 0};
-  volatile vector16x_u8 bswap64_const = { 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7 };
-  volatile vector16x_u8 bswap_const = { 12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3 };
-  volatile vector1x_u128 H = VEC_LOAD_BE(gcm_key, bswap_const);
+  vector2x_u64 zero8 = {0, 0};
+  vector16x_u8 bswap64_const = { 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7 };
+  vector16x_u8 bswap_const = { 12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3 };
+  vector1x_u128 H = VEC_LOAD_BE(gcm_key, bswap_const);
 
-  volatile vector16x_u8 c2, t0, t1, t2, most_sig_of_H, t4, t5, t6;
-  volatile vector2x_u64 d0, d1, d2;
-  volatile vector2x_u64 in, in2;
-  volatile vector2x_u64 H_lo = zero8, H_hi = zero8;
-  volatile vector2x_u64 lo, mid, hi;
-  volatile vector2x_u64 H2_lo = zero8, H2, H2_hi = zero8;
-  volatile vector2x_u64 X_lo, X2_lo, X_mid, X2_mid, X_hi, X2_hi,
+  vector16x_u8 t0, t1, t2, most_sig_of_H, t4, t5, t6;
+  vector2x_u64 d0, d1, d2;
+  vector2x_u64 in, in2;
+  vector2x_u64 H_lo = zero8, H_hi = zero8;
+  vector2x_u64 lo, mid, hi;
+  vector2x_u64 H2_lo = zero8, H2, H2_hi = zero8;
+  vector2x_u64 X_lo, X2_lo, X_mid, X2_mid, X_hi, X2_hi,
     reduce, reduce2;
 
   // This in a long sequence to create the following constant
   // { U64_C(0x0000000000000001), U64_C(0xc200000000000000) };
-  c2 = vec_splat_u8(-16); // 0xf0, because gcc is buggy
-  t0 = vec_splat_u8(1);
-  c2 = c2 + c2; // 0xe0
-  c2 = c2 | t0; // 0xe1
-  c2 = (vector16x_u8)((vector1x_u128)(c2) << (15 * 8));
-  t1 = (vector16x_u8)((vector1x_u128)(t0) >> (15 * 8));
-  c2 = c2 + c2; // 0xc2
-  c2 = c2 | t1; // 0xc2......01 finially
+  //c2 = vec_splat_u8(-16); // 0xf0, because gcc is buggy
+  //t0 = vec_splat_u8(1);
+  //c2 = c2 + c2; // 0xe0
+  //c2 = c2 | t0; // 0xe1
+  //c2 = (vector16x_u8)((vector1x_u128)(c2) << (15 * 8));
+  //t1 = (vector16x_u8)((vector1x_u128)(t0) >> (15 * 8));
+  //c2 = c2 + c2; // 0xc2
+  //c2 = c2 | t1; // 0xc2......01 finially
+  vector2x_u64 c2orig = { 0x0000000000000001ULL, 0xc200000000000000ULL };
+  vector16x_u8 c2 = (vector16x_u8)c2orig;
 
   // rotate H
   t2 = vec_splat_u8(7);
