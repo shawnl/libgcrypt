@@ -141,10 +141,9 @@ vec_aligned_st(block vec, unsigned long offset, unsigned char *ptr)
 	   : "v" (vec), "r" (offset), "r" ((uintptr_t)ptr)
 	   : "memory", "r0");
 #else
-  vec_vsx_st (vec, offset, ptr);
+  vec_vsx_st ((vector16x_u8)vec, offset, ptr);
 #endif
 }
-
 
 #define VEC_LOAD_BE(in_ptr, bswap_const) \
   (vec_load_be (0, (const unsigned char *)(in_ptr), bswap_const))
@@ -176,6 +175,14 @@ vec_load_be(unsigned long offset, const unsigned char *ptr,
   "The Galois/Counter Mode of Operation (GCM)"; David A. McGrew, John Viega
   "Intel® Carry-Less Multiplication Instruction and its Usage for Computing the
    GCM Mode - Rev 2.01"; Shay Gueron, Michael E. Kounavis.
+
+  After saving the magic c2 constant and pre-formatted version of the key,
+  we pre-process the key for parallel hashing. This takes advantage of the identity
+  of addition over a glois field being identital to XOR, and thus cumulative. (S 2.2, page 3)
+  We multiply and add (glois field versions) the key over multiple iterations and save the result.
+  This can later be glois added (XORed) with parallel processed input.
+
+  The ghash "key" is a salt.
  */
 void ASM_FUNC_ATTR 
 _gcry_ghash_setup_ppc_vpmsum (uint64_t *gcm_table, void *gcm_key)
@@ -222,10 +229,10 @@ _gcry_ghash_setup_ppc_vpmsum (uint64_t *gcm_table, void *gcm_key)
   H_lo[0] = ((vector2x_u64)H)[1];
   H_hi[1] = ((vector2x_u64)H)[0];
 
-  STORE_TABLE(gcm_table, 1, c2);
-  STORE_TABLE(gcm_table, 2, H_lo);
-  STORE_TABLE(gcm_table, 3, H);
-  STORE_TABLE(gcm_table, 4, H_hi);
+  STORE_TABLE(gcm_table, 0, c2);
+  STORE_TABLE(gcm_table, 1, H_lo);
+  STORE_TABLE(gcm_table, 2, H);
+  STORE_TABLE(gcm_table, 3, H_hi);
 
   lo = asm_vpmsumd(H_lo, in); // do not need to mask in because 0 * anything -> 0
   mid = asm_vpmsumd((vector2x_u64)H, in);
@@ -251,9 +258,9 @@ _gcry_ghash_setup_ppc_vpmsum (uint64_t *gcm_table, void *gcm_key)
   H2_lo[0] = ((vector2x_u64)H2)[1];
   H2_hi[1] = ((vector2x_u64)H2)[0];
 
-  STORE_TABLE(gcm_table, 5, H2_lo);
-  STORE_TABLE(gcm_table, 6, H2);
-  STORE_TABLE(gcm_table, 7, H2_hi);
+  STORE_TABLE(gcm_table, 4, H2_lo);
+  STORE_TABLE(gcm_table, 5, H2);
+  STORE_TABLE(gcm_table, 6, H2_hi);
 
   X_lo = asm_vpmsumd(H2_lo, in);
   X2_lo = asm_vpmsumd(H2_lo, in2);
@@ -297,24 +304,57 @@ _gcry_ghash_setup_ppc_vpmsum (uint64_t *gcm_table, void *gcm_key)
   H2_lo = (vector2x_u64)((vector1x_u128)H2 << 64);
   H2_hi = (vector2x_u64)((vector1x_u128)H2 >> 64);
 
-  STORE_TABLE(gcm_table, 8, H_lo);
-  STORE_TABLE(gcm_table, 9, H);
-  STORE_TABLE(gcm_table, 10, H_hi);
-  STORE_TABLE(gcm_table, 11, H2_lo);
-  STORE_TABLE(gcm_table, 12, H2);
-  STORE_TABLE(gcm_table, 13, H2_hi);
+  STORE_TABLE(gcm_table, 7, H_lo);
+  STORE_TABLE(gcm_table, 8, H);
+  STORE_TABLE(gcm_table, 9, H_hi);
+  STORE_TABLE(gcm_table, 10, H2_lo);
+  STORE_TABLE(gcm_table, 11, H2);
+  STORE_TABLE(gcm_table, 12, H2_hi);
 }
 
 unsigned int ASM_FUNC_ATTR
 __attribute__((optimize(0)))
-_gcry_ghash_ppc_vpmsum (void *gcm_key, volatile byte *result, volatile const byte *buf,
+_gcry_ghash_ppc_vpmsum (volatile byte *result, void *gcm_table, volatile const byte *buf,
                           volatile size_t nblocks)
 {
-  volatile vector16x_u8 c7;
-  volatile block c2;
+  vector16x_u8 bswap_const = { 12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3 };
+  vector16x_u8 bswap_8_const = { 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0 };
+  volatile block c2, Hl, Hm, Hh, in, Hm_right, Hl_rotate, cur;
 
-  c7 = vec_splat_u8(7);
-  c2 = vec_aligned_ld(0, gcm_key);
+  volatile block t0;
+
+  cur = vec_aligned_ld(0, result);
+
+for (int i=0;i!=nblocks;i++) {
+  in = vec_load_be(16 * i, (vector16x_u8*)buf, bswap_const);
+  cur ^= in;
+  c2 = vec_aligned_ld(0, gcm_table);
+  Hl = vec_aligned_ld(16, gcm_table);
+  Hm = vec_aligned_ld(32, gcm_table);
+  Hh = vec_aligned_ld(48, gcm_table);
+
+  Hl = (block)asm_vpmsumd((vector2x_u64)cur, (vector2x_u64)Hl);
+  Hm = (block)asm_vpmsumd((vector2x_u64)cur, (vector2x_u64)Hm);
+  Hh = (block)asm_vpmsumd((vector2x_u64)cur, (vector2x_u64)Hh);
+
+  t0 = (block)asm_vpmsumd((vector2x_u64)Hl, (vector2x_u64)c2);
+
+  Hl ^= Hm << 64;
+
+  Hm_right = Hm >> 64;
+  Hh ^= Hm_right;
+  Hl_rotate = Hl << 64 | Hl >> 64;
+  Hl_rotate ^= t0;
+  Hl = Hl_rotate << 64 | Hl_rotate >> 64;
+  Hl_rotate = (block)asm_vpmsumd((vector2x_u64)Hl_rotate, (vector2x_u64)c2);
+  Hl ^= Hh;
+  Hl ^= Hl_rotate;
+
+  cur = Hl;
+}
+
+  cur = (block)vec_perm((vector16x_u8)cur, (vector16x_u8)cur, bswap_8_const);
+  STORE_TABLE(result, 0, cur);
 }
 
 #endif /* GCM_USE_PPC_VPMSUM */

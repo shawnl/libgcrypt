@@ -93,7 +93,7 @@ ghash_armv7_neon (gcry_cipher_hd_t c, byte *result, const byte *buf,
 extern void _gcry_ghash_setup_ppc_vpmsum (void *gcm_table, void *gcm_key);
 
 /* result is 128-bits */
-extern unsigned int _gcry_ghash_ppc_vpmsum (void *result, void *gcm_key,
+extern unsigned int _gcry_ghash_ppc_vpmsum (void *result, void *gcm_table,
 					const byte *buf, size_t nblocks);
 
 static void
@@ -103,10 +103,11 @@ ghash_setup_ppc_vpmsum (gcry_cipher_hd_t c)
 }
 
 static unsigned int
+__attribute__((optimize(0)))
 ghash_ppc_vpmsum (gcry_cipher_hd_t c, byte *result, const byte *buf,
 	      size_t nblocks)
 {
-  return _gcry_ghash_ppc_vpmsum(result, c->u_mode.gcm.u_ghash_key.key, buf,
+  return _gcry_ghash_ppc_vpmsum(result, c->u_mode.gcm.gcm_table, buf,
 			     nblocks);
 }
 #endif /* GCM_USE_PPC_VPMSUM */

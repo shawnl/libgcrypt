@@ -104,6 +104,7 @@
     defined(HAVE_GCC_INLINE_ASM_PPC_ALTIVEC) && \
     __GNUC__ >= 4
 #  define GCM_USE_PPC_VPMSUM 1
+#  define NEED_16BYTE_ALIGNED_CONTEXT 1 /* this also aligns gcm_table */
 #endif
 #endif /* GCM_USE_PPC_VPMSUM */
 
@@ -319,9 +320,6 @@ struct gcry_cipher_handle
         unsigned char key[MAX_BLOCKSIZE];
       } u_ghash_key;
 
-      /* GHASH implementation in use. */
-      ghash_fn_t ghash_fn;
-
       /* Pre-calculated table for GCM. */
 #ifdef GCM_USE_TABLES
  #if (SIZEOF_UNSIGNED_LONG == 8 || defined(__x86_64__))
@@ -332,6 +330,9 @@ struct gcry_cipher_handle
       u32 gcm_table[8 * 16];
  #endif
 #endif
+
+      /* GHASH implementation in use. */
+      ghash_fn_t ghash_fn;
     } gcm;
 
     /* Mode specific storage for OCB mode. */
