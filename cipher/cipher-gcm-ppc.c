@@ -317,16 +317,19 @@ __attribute__((optimize(0)))
 _gcry_ghash_ppc_vpmsum (volatile byte *result, void *gcm_table, volatile const byte *buf,
                           volatile size_t nblocks)
 {
-  vector16x_u8 bswap_const = { 12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3 };
+  vector16x_u8 bswap_32_const = { 12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3 };
   vector16x_u8 bswap_8_const = { 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0 };
   volatile block c2, Hl, Hm, Hh, in, Hm_right, Hl_rotate, cur;
 
   volatile block t0;
 
   cur = vec_aligned_ld(0, result);
+  cur = (block)vec_perm((vector16x_u8)cur, (vector16x_u8)cur, bswap_8_const);
+
+  //cur = vec_load_be(0, (vector16x_u8*)result, bswap_8_const);
 
 for (int i=0;i!=nblocks;i++) {
-  in = vec_load_be(16 * i, (vector16x_u8*)buf, bswap_const);
+  in = vec_load_be(16 * i, (vector16x_u8*)buf, bswap_32_const);
   cur ^= in;
   c2 = vec_aligned_ld(0, gcm_table);
   Hl = vec_aligned_ld(16, gcm_table);
