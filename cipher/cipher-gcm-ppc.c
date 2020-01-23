@@ -129,7 +129,7 @@ void hexDump (const char *desc, const void *addr, const int len) {
 
 #define STORE_TABLE(gcm_table, slot, vec) \
   vec_aligned_st (((block)vec), slot * 16, (unsigned char *)(gcm_table)); \
-  hexDump("", &vec, 16);
+  //hexDump("", &vec, 16);
 
 
 static ASM_FUNC_ATTR_INLINE void
@@ -184,7 +184,8 @@ vec_load_be(unsigned long offset, const unsigned char *ptr,
 
   The ghash "key" is a salt.
  */
-void ASM_FUNC_ATTR 
+void ASM_FUNC_ATTR
+__attribute__((optimize(0)))
 _gcry_ghash_setup_ppc_vpmsum (uint64_t *gcm_table, void *gcm_key)
 {
   vector2x_u64 zero8 = {0, 0};
@@ -312,29 +313,39 @@ _gcry_ghash_setup_ppc_vpmsum (uint64_t *gcm_table, void *gcm_key)
   STORE_TABLE(gcm_table, 12, H2_hi);
 }
 
-unsigned int ASM_FUNC_ATTR
+#include <assert.h>
+void ASM_FUNC_ATTR
 __attribute__((optimize(0)))
-_gcry_ghash_ppc_vpmsum (volatile byte *result, void *gcm_table, volatile const byte *buf,
-                          volatile size_t nblocks)
+_gcry_ghash_ppc_vpmsum (byte *result, void *gcm_table, const byte *buf,
+                          size_t nblocks)
 {
-  vector16x_u8 bswap_32_const = { 12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3 };
+  // This const is strange, it is reversing the bytes, and also reversing the u32s that get switched by lxvw4
+  // and it also addresses bytes big-endian, and is here due to lack of proper peep-hole optimization.
+  vector16x_u8 bswap_const = { 12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3 };
   vector16x_u8 bswap_8_const = { 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0 };
   volatile block c2, Hl, Hm, Hh, in, Hm_right, Hl_rotate, cur;
 
-  volatile block t0;
+  block t0;
 
-  cur = vec_aligned_ld(0, result);
-  cur = (block)vec_perm((vector16x_u8)cur, (vector16x_u8)cur, bswap_8_const);
+  //cur = vec_aligned_ld(0, result);
+  //cur = (block)vec_perm((vector16x_u8)cur, (vector16x_u8)cur, bswap_8_const);
 
-  //cur = vec_load_be(0, (vector16x_u8*)result, bswap_8_const);
+  cur = vec_load_be(0, (unsigned char*)result, bswap_const);
 
-for (int i=0;i!=nblocks;i++) {
-  in = vec_load_be(16 * i, (vector16x_u8*)buf, bswap_32_const);
-  cur ^= in;
+  hexDump("in Xi", result, 16);
+
+  hexDump("table", gcm_table, 64);
+  
   c2 = vec_aligned_ld(0, gcm_table);
   Hl = vec_aligned_ld(16, gcm_table);
   Hm = vec_aligned_ld(32, gcm_table);
   Hh = vec_aligned_ld(48, gcm_table);
+
+  hexDump("in", buf, 16 * nblocks);
+  
+for (int i=0;i!=nblocks;i++) {
+  in = vec_load_be(16 * i, (vector16x_u8*)buf, bswap_const);
+  cur ^= in;
 
   Hl = (block)asm_vpmsumd((vector2x_u64)cur, (vector2x_u64)Hl);
   Hm = (block)asm_vpmsumd((vector2x_u64)cur, (vector2x_u64)Hm);
@@ -358,6 +369,11 @@ for (int i=0;i!=nblocks;i++) {
 
   cur = (block)vec_perm((vector16x_u8)cur, (vector16x_u8)cur, bswap_8_const);
   STORE_TABLE(result, 0, cur);
+  if (((uintptr_t)result & 0xf) > 0) {
+    printf("%lu\n", (uintptr_t)result);
+    abort();
+  }
+  hexDump("out Xi", result, 16);
 }
 
 #endif /* GCM_USE_PPC_VPMSUM */

@@ -103,12 +103,12 @@ ghash_setup_ppc_vpmsum (gcry_cipher_hd_t c)
 }
 
 static unsigned int
-__attribute__((optimize(0)))
 ghash_ppc_vpmsum (gcry_cipher_hd_t c, byte *result, const byte *buf,
 	      size_t nblocks)
 {
-  return _gcry_ghash_ppc_vpmsum(result, c->u_mode.gcm.gcm_table, buf,
+  _gcry_ghash_ppc_vpmsum(result, c->u_mode.gcm.gcm_table, buf,
 			     nblocks);
+  return 0;
 }
 #endif /* GCM_USE_PPC_VPMSUM */
 
