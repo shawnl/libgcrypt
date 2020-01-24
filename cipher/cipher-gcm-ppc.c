@@ -129,7 +129,7 @@ void hexDump (const char *desc, const void *addr, const int len) {
 
 #define STORE_TABLE(gcm_table, slot, vec) \
   vec_aligned_st (((block)vec), slot * 16, (unsigned char *)(gcm_table)); \
-  //hexDump("", &vec, 16);
+  hexDump("", &vec, 16);
 
 
 static ASM_FUNC_ATTR_INLINE void
@@ -193,13 +193,13 @@ _gcry_ghash_setup_ppc_vpmsum (uint64_t *gcm_table, void *gcm_key)
   vector16x_u8 bswap_const = { 12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3 };
   vector1x_u128 H = VEC_LOAD_BE(gcm_key, bswap_const);
 
-  vector16x_u8 t0, t1, t2, most_sig_of_H, t4, t5, t6;
-  vector2x_u64 d0, d1, d2;
-  vector2x_u64 in, in2;
-  vector2x_u64 H_lo = zero8, H_hi = zero8;
-  vector2x_u64 lo, mid, hi;
-  vector2x_u64 H2_lo = zero8, H2, H2_hi = zero8;
-  vector2x_u64 X_lo, X2_lo, X_mid, X2_mid, X_hi, X2_hi,
+  volatile vector16x_u8 t0, t1, t2, most_sig_of_H, t4, t5, t6;
+  volatile vector2x_u64 d0, d1, d2;
+  volatile vector2x_u64 in, in2;
+  volatile vector2x_u64 H_lo = zero8, H_hi = zero8;
+  volatile vector2x_u64 lo, mid, hi;
+  volatile vector2x_u64 H2_lo = zero8, H2, H2_hi = zero8;
+  volatile vector2x_u64 X_lo, X2_lo, X_mid, X2_mid, X_hi, X2_hi,
     reduce, reduce2;
 
   // This in a long sequence to create the following constant
@@ -220,8 +220,8 @@ _gcry_ghash_setup_ppc_vpmsum (uint64_t *gcm_table, void *gcm_key)
   most_sig_of_H = vec_splat((vector16x_u8)H, 15);
   vector1x_u128 one = {1};
   H = H << one; // vsl is a strange instruction, and I don't think it is modeled, but it can reuse t0 above
-  most_sig_of_H = most_sig_of_H >> t2;
-  most_sig_of_H = most_sig_of_H & c2;
+  most_sig_of_H = most_sig_of_H << t2;
+  most_sig_of_H = most_sig_of_H | c2;
   in = (vector2x_u64)(H ^ (vector1x_u128)most_sig_of_H);
 
   c2 = (vector16x_u8)((vector1x_u128)c2 >> 64); // change mask to 00000000c2000000
@@ -302,8 +302,10 @@ _gcry_ghash_setup_ppc_vpmsum (uint64_t *gcm_table, void *gcm_key)
 
   H_lo = (vector2x_u64)((vector1x_u128)H << 64);
   H_hi = (vector2x_u64)((vector1x_u128)H >> 64);
+  H = ((vector1x_u128)H << 64 | (vector1x_u128)H >> 64);
   H2_lo = (vector2x_u64)((vector1x_u128)H2 << 64);
   H2_hi = (vector2x_u64)((vector1x_u128)H2 >> 64);
+  H2 = (vector2x_u64)((vector1x_u128)H2 << 64 | (vector1x_u128)H2 >> 64);
 
   STORE_TABLE(gcm_table, 7, H_lo);
   STORE_TABLE(gcm_table, 8, H);
@@ -317,15 +319,15 @@ _gcry_ghash_setup_ppc_vpmsum (uint64_t *gcm_table, void *gcm_key)
 void ASM_FUNC_ATTR
 __attribute__((optimize(0)))
 _gcry_ghash_ppc_vpmsum (byte *result, void *gcm_table, const byte *buf,
-                          size_t nblocks)
+                          volatile size_t nblocks)
 {
   // This const is strange, it is reversing the bytes, and also reversing the u32s that get switched by lxvw4
   // and it also addresses bytes big-endian, and is here due to lack of proper peep-hole optimization.
   vector16x_u8 bswap_const = { 12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3 };
   vector16x_u8 bswap_8_const = { 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0 };
-  volatile block c2, Hl, Hm, Hh, in, Hm_right, Hl_rotate, cur;
+  volatile block c2, H0l, H0m, H0h, Hl, Hm, Hh, in, Hm_right, Hl_rotate, cur;
 
-  block t0;
+  volatile block t0;
 
   //cur = vec_aligned_ld(0, result);
   //cur = (block)vec_perm((vector16x_u8)cur, (vector16x_u8)cur, bswap_8_const);
@@ -337,19 +339,19 @@ _gcry_ghash_ppc_vpmsum (byte *result, void *gcm_table, const byte *buf,
   hexDump("table", gcm_table, 64);
   
   c2 = vec_aligned_ld(0, gcm_table);
-  Hl = vec_aligned_ld(16, gcm_table);
-  Hm = vec_aligned_ld(32, gcm_table);
-  Hh = vec_aligned_ld(48, gcm_table);
+  H0l = vec_aligned_ld(16, gcm_table);
+  H0m = vec_aligned_ld(32, gcm_table);
+  H0h = vec_aligned_ld(48, gcm_table);
 
   hexDump("in", buf, 16 * nblocks);
   
-for (int i=0;i!=nblocks;i++) {
-  in = vec_load_be(16 * i, (vector16x_u8*)buf, bswap_const);
+for (size_t off = 0; off != (nblocks * 16); off += 16) {
+  in = vec_load_be(off, (vector16x_u8*)buf, bswap_const);
   cur ^= in;
 
-  Hl = (block)asm_vpmsumd((vector2x_u64)cur, (vector2x_u64)Hl);
-  Hm = (block)asm_vpmsumd((vector2x_u64)cur, (vector2x_u64)Hm);
-  Hh = (block)asm_vpmsumd((vector2x_u64)cur, (vector2x_u64)Hh);
+  Hl = (block)asm_vpmsumd((vector2x_u64)cur, (vector2x_u64)H0l);
+  Hm = (block)asm_vpmsumd((vector2x_u64)cur, (vector2x_u64)H0m);
+  Hh = (block)asm_vpmsumd((vector2x_u64)cur, (vector2x_u64)H0h);
 
   t0 = (block)asm_vpmsumd((vector2x_u64)Hl, (vector2x_u64)c2);
 
