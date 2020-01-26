@@ -41,6 +41,7 @@
 #define ASM_FUNC_ATTR_INLINE ASM_FUNC_ATTR ALWAYS_INLINE
 
 typedef vector unsigned char vector16x_u8;
+typedef vector signed char vector16x_s8;
 typedef vector unsigned long long vector2x_u64;
 typedef vector unsigned __int128 vector1x_u128;
 typedef vector unsigned __int128 block;
@@ -75,11 +76,11 @@ vec_aligned_ld(unsigned long offset, const unsigned char *ptr)
 
 #include <stdio.h>
 
-void hexDump (const char *desc, const void *addr, const int len) {
+void hexDump (const char *desc, volatile const void *volatile addr, const int len) {
     int i;
     unsigned char buff[17];
     const unsigned char *pc = (const unsigned char*)addr;
-
+return;
     // Output description if given.
     if (desc != NULL)
         printf ("%s:\n", desc);
@@ -184,6 +185,37 @@ vec_load_be(unsigned long offset, const unsigned char *ptr,
 
   The ghash "key" is a salt.
  */
+void ASM_FUNC_ATTR
+__attribute__((optimize(0)))
+_gcry_ghash_setup_ppc_vpmsum (uint64_t *gcm_table, void *gcm_key)
+{
+  vector16x_u8 bswap_const = { 12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3 };
+  vector16x_u8 c2 = { 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0b11000010};
+  vector1x_u128 T0;
+  vector1x_u128 H, Hl, Hh;
+  vector16x_s8 most_sig_of_H, t7, carry;
+
+  H = VEC_LOAD_BE(gcm_key, bswap_const);
+  most_sig_of_H = vec_splat((vector16x_s8)H, 15);
+  vector1x_u128 one = {1};
+  H = H << one;
+  t7 = vec_splat_s8(7);
+  carry = most_sig_of_H >> t7;
+  carry &= c2; // only interested in certain carries.
+  H ^= (vector1x_u128)carry; // complete the <<< 1
+
+  H = H << 64 | H >> 64;
+
+  Hl = H >> 64;
+  Hh = H << 64;
+  T0 = (vector1x_u128)c2 >> 64;
+
+  STORE_TABLE(gcm_table, 0, T0);
+  STORE_TABLE(gcm_table, 1, Hl);
+  STORE_TABLE(gcm_table, 2, H);
+  STORE_TABLE(gcm_table, 3, Hh);
+}
+/*
 void ASM_FUNC_ATTR
 __attribute__((optimize(0)))
 _gcry_ghash_setup_ppc_vpmsum (uint64_t *gcm_table, void *gcm_key)
@@ -313,11 +345,10 @@ _gcry_ghash_setup_ppc_vpmsum (uint64_t *gcm_table, void *gcm_key)
   STORE_TABLE(gcm_table, 10, H2_lo);
   STORE_TABLE(gcm_table, 11, H2);
   STORE_TABLE(gcm_table, 12, H2_hi);
-}
+}*/
 
 #include <assert.h>
 void ASM_FUNC_ATTR
-__attribute__((optimize(0)))
 _gcry_ghash_ppc_vpmsum (byte *result, void *gcm_table, const byte *buf,
                           volatile size_t nblocks)
 {
@@ -325,9 +356,9 @@ _gcry_ghash_ppc_vpmsum (byte *result, void *gcm_table, const byte *buf,
   // and it also addresses bytes big-endian, and is here due to lack of proper peep-hole optimization.
   vector16x_u8 bswap_const = { 12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3 };
   vector16x_u8 bswap_8_const = { 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0 };
-  volatile block c2, H0l, H0m, H0h, Hl, Hm, Hh, in, Hm_right, Hl_rotate, cur;
+  block c2, H0l, H0m, H0h, Hl, Hm, Hh, in, Hm_right, Hl_rotate, cur;
 
-  volatile block t0;
+  block t0;
 
   //cur = vec_aligned_ld(0, result);
   //cur = (block)vec_perm((vector16x_u8)cur, (vector16x_u8)cur, bswap_8_const);
@@ -371,10 +402,6 @@ for (size_t off = 0; off != (nblocks * 16); off += 16) {
 
   cur = (block)vec_perm((vector16x_u8)cur, (vector16x_u8)cur, bswap_8_const);
   STORE_TABLE(result, 0, cur);
-  if (((uintptr_t)result & 0xf) > 0) {
-    printf("%lu\n", (uintptr_t)result);
-    abort();
-  }
   hexDump("out Xi", result, 16);
 }
 
