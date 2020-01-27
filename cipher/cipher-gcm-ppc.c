@@ -46,10 +46,16 @@ typedef vector unsigned long long vector2x_u64;
 typedef vector unsigned __int128 vector1x_u128;
 typedef vector unsigned __int128 block;
 
-static ASM_FUNC_ATTR_INLINE vector2x_u64
-asm_vpmsumd(vector2x_u64 a, vector2x_u64 b)
+/* While this would makse sense to use vector2x_u64 given that
+ * it works on the first 64 bits and second 64 bits seperately,
+ * I find it easier to work with this way, and it makes swapping
+ * the two halves much easier as a single vector1x_u128 with can
+ * be manipulated with bit shifts.
+ */
+static ASM_FUNC_ATTR_INLINE block
+asm_vpmsumd(block a, block b)
 {
-  vector2x_u64 r;
+  block r;
   __asm__("vpmsumd %0, %1, %2"
 	  : "=v" (r)
 	  : "v" (a), "v" (b));
@@ -80,7 +86,7 @@ void hexDump (const char *desc, volatile const void *volatile addr, const int le
     int i;
     unsigned char buff[17];
     const unsigned char *pc = (const unsigned char*)addr;
-return;
+
     // Output description if given.
     if (desc != NULL)
         printf ("%s:\n", desc);
@@ -190,30 +196,137 @@ __attribute__((optimize(0)))
 _gcry_ghash_setup_ppc_vpmsum (uint64_t *gcm_table, void *gcm_key)
 {
   vector16x_u8 bswap_const = { 12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3 };
-  vector16x_u8 c2 = { 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0b11000010};
-  vector1x_u128 T0;
-  vector1x_u128 H, Hl, Hh;
-  vector16x_s8 most_sig_of_H, t7, carry;
+  volatile vector16x_u8 c2 = { 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0b11000010};
+  volatile vector1x_u128 T0;
+  volatile vector1x_u128 C2, H, H1_invert, H1, H1l, H1h;
+  volatile vector16x_s8 most_sig_of_H, t7, carry;
+  vector1x_u128 one = {1};
 
   H = VEC_LOAD_BE(gcm_key, bswap_const);
   most_sig_of_H = vec_splat((vector16x_s8)H, 15);
-  vector1x_u128 one = {1};
-  H = H << one;
   t7 = vec_splat_s8(7);
   carry = most_sig_of_H >> t7;
   carry &= c2; // only interested in certain carries.
-  H ^= (vector1x_u128)carry; // complete the <<< 1
+  H1 = H << one;
+  H1 ^= (vector1x_u128)carry; // complete the <<< 1
 
-  H = H << 64 | H >> 64;
+  T0 = H1 << 64 | H1 >> 64;
+  H1l = T0 >> 64;
+  H1h = T0 << 64;
+  C2 = (vector1x_u128)c2 >> 64;
 
-  Hl = H >> 64;
-  Hh = H << 64;
-  T0 = (vector1x_u128)c2 >> 64;
+  STORE_TABLE(gcm_table, 0, C2);
+  STORE_TABLE(gcm_table, 1, H1l);
+  STORE_TABLE(gcm_table, 2, T0);
+  STORE_TABLE(gcm_table, 3, H1h);
 
-  STORE_TABLE(gcm_table, 0, T0);
-  STORE_TABLE(gcm_table, 1, Hl);
-  STORE_TABLE(gcm_table, 2, H);
-  STORE_TABLE(gcm_table, 3, Hh);
+  volatile vector2x_u64 lo, mid, hi, d2, d0, d1, H2, H2_lo, H2_hi, X_lo, X2_lo, X_mid, X2_mid, X_hi, X2_hi, reduce, reduce2, in2;
+  
+  lo = (vector2x_u64)asm_vpmsumd(H1l, H1); // do not need to mask in because 0 * anything -> 0
+  mid = (vector2x_u64)asm_vpmsumd(T0, H1);
+  hi = (vector2x_u64)asm_vpmsumd(H1h, H1);
+
+  // reduce 1
+  d2 = (vector2x_u64)asm_vpmsumd((block)lo, C2);
+
+  d0 = (vector2x_u64)((vector1x_u128)mid << 64);
+  d1 = (vector2x_u64)((vector1x_u128)mid >> 64);
+  lo ^= d0;
+  hi ^= d1;
+  lo = (vector2x_u64)((vector1x_u128)lo << 64 | (vector1x_u128)lo >> 64);
+  lo ^= d2;
+
+  // reduce 2
+  d1 = (vector2x_u64)((vector1x_u128)lo << 64 | (vector1x_u128)lo >> 64);
+  lo = (vector2x_u64)asm_vpmsumd((block)lo, C2);
+  d1 ^= hi;
+  in2 = lo ^ d1;
+
+  H2 = (vector2x_u64)(((vector1x_u128)in2 << 64) | ((vector1x_u128)in2 >> 64));
+  H2_lo[0] = ((vector2x_u64)H2)[1];
+  H2_lo[1] = 0;
+  H2_hi[1] = ((vector2x_u64)H2)[0];
+  H2_hi[0] = 0;
+
+  STORE_TABLE(gcm_table, 4, H2_lo);
+  STORE_TABLE(gcm_table, 5, H2);
+  STORE_TABLE(gcm_table, 6, H2_hi);
+  /*
+  X_lo = asm_vpmsumd(H2_lo, in);
+  X2_lo = asm_vpmsumd(H2_lo, in2);
+  X_mid = asm_vpmsumd(H2, in);
+  X2_mid = asm_vpmsumd(H2, in2);
+  X_hi = asm_vpmsumd(H2_hi, in);
+  X2_hi = asm_vpmsumd(H2_hi, in2);
+
+  reduce = asm_vpmsumd(X_lo, C2);
+  reduce2 = asm_vpmsumd(X2_lo, C2);
+
+  X_lo ^= (vector2x_u64)((vector1x_u128)X_mid << 64);
+  X_hi ^= (vector2x_u64)((vector1x_u128)X_mid >> 64);
+  X2_lo ^= (vector2x_u64)((vector1x_u128)X2_mid << 64);
+  X2_hi ^= (vector2x_u64)((vector1x_u128)X2_mid >> 64);
+
+  H = ((vector1x_u128)X_lo << 64 | (vector1x_u128)X_lo >> 64);
+  H2[0] = ((vector2x_u64)X2_lo)[1];
+  H2[1] = ((vector2x_u64)X2_lo)[0];
+
+  H ^=  (vector1x_u128)reduce;
+  H2 ^= reduce2;
+
+  // We could have also b64 switched reduce and reduce2, however as we are
+  // using the unrotated H and H2 above to vpmsum, this is marginally better.
+  reduce[0] = ((vector2x_u64)H)[1];
+  reduce[1] = ((vector2x_u64)H)[0];
+  reduce2[0] = ((vector2x_u64)H2)[1];
+  reduce2[1] = ((vector2x_u64)H2)[0];
+
+  H =  (vector1x_u128)asm_vpmsumd((vector2x_u64)H, C2);
+  H2 = asm_vpmsumd(H2, C2);
+
+  reduce ^= X_hi;
+  reduce2 ^= X2_hi;
+  H ^= (vector1x_u128)reduce;
+  H2 ^= reduce2;
+
+  H_lo = (vector2x_u64)((vector1x_u128)H << 64);
+  H_hi = (vector2x_u64)((vector1x_u128)H >> 64);
+  H = ((vector1x_u128)H << 64 | (vector1x_u128)H >> 64);
+  H2_lo = (vector2x_u64)((vector1x_u128)H2 << 64);
+  H2_hi = (vector2x_u64)((vector1x_u128)H2 >> 64);
+  H2 = (vector2x_u64)((vector1x_u128)H2 << 64 | (vector1x_u128)H2 >> 64);
+
+  STORE_TABLE(gcm_table, 7, H_lo);
+  STORE_TABLE(gcm_table, 8, H);
+  STORE_TABLE(gcm_table, 9, H_hi);
+  STORE_TABLE(gcm_table, 10, H2_lo);
+  STORE_TABLE(gcm_table, 11, H2);
+  STORE_TABLE(gcm_table, 12, H2_hi);
+   * */
+  /*
+  H2l = asm_vpmsumd(H1l, H1); // do not need to mask in because 0 * anything -> 0
+  H2 = asm_vpmsumd(H, H1);
+  H2h = asm_vpmsumd(H1h, H1);
+
+  // reduce 1
+  T0 = asm_vpmsumd(H2l, C2);
+
+  H2l ^= (H2 << 64);
+  H2h ^= (H2 >> 64);
+  H2l = H2l << 64 | H2l >> 64;
+  H2l ^= T0;
+
+  // reduce 2
+  T0 = asm_vpmsumd(H2l, C2);
+  H3 = T0 ^ H2h ^ (H2l << 64 | H2l >> 64);
+
+  H3 = H3 << 64 | H3 >> 64;
+  H3l = H3 << 64;
+  H3h = H3 >> 64;
+
+  STORE_TABLE(gcm_table, 4, H3l);
+  STORE_TABLE(gcm_table, 5, H3);
+  STORE_TABLE(gcm_table, 6, H3h);*/
 }
 /*
 void ASM_FUNC_ATTR
@@ -363,7 +476,7 @@ _gcry_ghash_ppc_vpmsum (byte *result, void *gcm_table, const byte *buf,
   //cur = vec_aligned_ld(0, result);
   //cur = (block)vec_perm((vector16x_u8)cur, (vector16x_u8)cur, bswap_8_const);
 
-  cur = vec_load_be(0, (unsigned char*)result, bswap_const);
+  cur = vec_load_be(0, (vector16x_u8*)result, bswap_const);
 
   hexDump("in Xi", result, 16);
 
@@ -380,11 +493,11 @@ for (size_t off = 0; off != (nblocks * 16); off += 16) {
   in = vec_load_be(off, (vector16x_u8*)buf, bswap_const);
   cur ^= in;
 
-  Hl = (block)asm_vpmsumd((vector2x_u64)cur, (vector2x_u64)H0l);
-  Hm = (block)asm_vpmsumd((vector2x_u64)cur, (vector2x_u64)H0m);
-  Hh = (block)asm_vpmsumd((vector2x_u64)cur, (vector2x_u64)H0h);
+  Hl = asm_vpmsumd(cur, H0l);
+  Hm = asm_vpmsumd(cur, H0m);
+  Hh = asm_vpmsumd(cur, H0h);
 
-  t0 = (block)asm_vpmsumd((vector2x_u64)Hl, (vector2x_u64)c2);
+  t0 = asm_vpmsumd(Hl, c2);
 
   Hl ^= Hm << 64;
 
@@ -393,7 +506,7 @@ for (size_t off = 0; off != (nblocks * 16); off += 16) {
   Hl_rotate = Hl << 64 | Hl >> 64;
   Hl_rotate ^= t0;
   Hl = Hl_rotate << 64 | Hl_rotate >> 64;
-  Hl_rotate = (block)asm_vpmsumd((vector2x_u64)Hl_rotate, (vector2x_u64)c2);
+  Hl_rotate = asm_vpmsumd(Hl_rotate, c2);
   Hl ^= Hh;
   Hl ^= Hl_rotate;
 
