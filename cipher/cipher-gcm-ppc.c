@@ -198,7 +198,7 @@ _gcry_ghash_setup_ppc_vpmsum (uint64_t *gcm_table, void *gcm_key)
   vector16x_u8 bswap_const = { 12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3 };
   volatile vector16x_u8 c2 = { 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0b11000010};
   volatile vector1x_u128 T0;
-  volatile vector1x_u128 C2, H, H1_invert, H1, H1l, H1h;
+  volatile vector1x_u128 C2, H, H1_invert, H1, H1l, H1h, H2, H2l, H2h;
   volatile vector16x_s8 most_sig_of_H, t7, carry;
   vector1x_u128 one = {1};
 
@@ -220,37 +220,33 @@ _gcry_ghash_setup_ppc_vpmsum (uint64_t *gcm_table, void *gcm_key)
   STORE_TABLE(gcm_table, 2, T0);
   STORE_TABLE(gcm_table, 3, H1h);
 
-  volatile vector2x_u64 lo, mid, hi, d2, d0, d1, H2, H2_lo, H2_hi, X_lo, X2_lo, X_mid, X2_mid, X_hi, X2_hi, reduce, reduce2, in2;
+  volatile vector2x_u64 lo, mid, hi, d2, d0, d1, X_lo, X2_lo, X_mid, X2_mid, X_hi, X2_hi, reduce, reduce2, in2;
   
-  lo = (vector2x_u64)asm_vpmsumd(H1l, H1); // do not need to mask in because 0 * anything -> 0
-  mid = (vector2x_u64)asm_vpmsumd(T0, H1);
-  hi = (vector2x_u64)asm_vpmsumd(H1h, H1);
+  H2l = asm_vpmsumd(H1l, H1); // do not need to mask in because 0 * anything -> 0
+  H2 = asm_vpmsumd(T0, H1);
+  H2h = asm_vpmsumd(H1h, H1);
 
   // reduce 1
-  d2 = (vector2x_u64)asm_vpmsumd((block)lo, C2);
+  T0 = asm_vpmsumd(H2l, C2);
 
-  d0 = (vector2x_u64)((vector1x_u128)mid << 64);
-  d1 = (vector2x_u64)((vector1x_u128)mid >> 64);
-  lo ^= d0;
-  hi ^= d1;
-  lo = (vector2x_u64)((vector1x_u128)lo << 64 | (vector1x_u128)lo >> 64);
-  lo ^= d2;
+  H2l ^= H2 << 64;
+  H2h ^= H2 >> 64;
+  H2l = H2l << 64 | H2l >> 64;
+  H2l ^= T0;
 
   // reduce 2
-  d1 = (vector2x_u64)((vector1x_u128)lo << 64 | (vector1x_u128)lo >> 64);
-  lo = (vector2x_u64)asm_vpmsumd((block)lo, C2);
-  d1 ^= hi;
+  d1 = (vector2x_u64)(H2l << 64 | H2l >> 64);
+  lo = (vector2x_u64)asm_vpmsumd(H2l, C2);
+  d1 ^= (vector2x_u64)H2h;
   in2 = lo ^ d1;
 
-  H2 = (vector2x_u64)(((vector1x_u128)in2 << 64) | ((vector1x_u128)in2 >> 64));
-  H2_lo[0] = ((vector2x_u64)H2)[1];
-  H2_lo[1] = 0;
-  H2_hi[1] = ((vector2x_u64)H2)[0];
-  H2_hi[0] = 0;
+  H2 = (((vector1x_u128)in2 << 64) | ((vector1x_u128)in2 >> 64));
+  H2l = H2 >> 64;
+  H2h = H2 << 64;
 
-  STORE_TABLE(gcm_table, 4, H2_lo);
+  STORE_TABLE(gcm_table, 4, H2l);
   STORE_TABLE(gcm_table, 5, H2);
-  STORE_TABLE(gcm_table, 6, H2_hi);
+  STORE_TABLE(gcm_table, 6, H2h);
   /*
   X_lo = asm_vpmsumd(H2_lo, in);
   X2_lo = asm_vpmsumd(H2_lo, in2);
