@@ -220,8 +220,6 @@ _gcry_ghash_setup_ppc_vpmsum (uint64_t *gcm_table, void *gcm_key)
   STORE_TABLE(gcm_table, 2, T0);
   STORE_TABLE(gcm_table, 3, H1h);
 
-  volatile vector2x_u64 lo, mid, hi, d2, d0, d1, X_lo, X2_lo, X_mid, X2_mid, X_hi, X2_hi, reduce, reduce2, in2;
-  
   H2l = asm_vpmsumd(H1l, H1); // do not need to mask in because 0 * anything -> 0
   H2 = asm_vpmsumd(T0, H1);
   H2h = asm_vpmsumd(H1h, H1);
@@ -233,20 +231,21 @@ _gcry_ghash_setup_ppc_vpmsum (uint64_t *gcm_table, void *gcm_key)
   H2h ^= H2 >> 64;
   H2l = H2l << 64 | H2l >> 64;
   H2l ^= T0;
-
   // reduce 2
-  d1 = (vector2x_u64)(H2l << 64 | H2l >> 64);
-  lo = (vector2x_u64)asm_vpmsumd(H2l, C2);
-  d1 ^= (vector2x_u64)H2h;
-  in2 = lo ^ d1;
+  T0 = H2l << 64 | H2l >> 64;
+  H2l = asm_vpmsumd(H2l, C2);
+  H2 = H2l ^ H2h ^ T0;
 
-  H2 = (((vector1x_u128)in2 << 64) | ((vector1x_u128)in2 >> 64));
-  H2l = H2 >> 64;
-  H2h = H2 << 64;
+  T0 = H2 << 64 | H2 >> 64;
+  H2l = T0 >> 64;
+  H2h = T0 << 64;
 
   STORE_TABLE(gcm_table, 4, H2l);
-  STORE_TABLE(gcm_table, 5, H2);
+  STORE_TABLE(gcm_table, 5, T0);
   STORE_TABLE(gcm_table, 6, H2h);
+  
+  volatile vector2x_u64 lo, mid, hi, d2, d0, d1, X_lo, X2_lo, X_mid, X2_mid, X_hi, X2_hi, reduce, reduce2, in2;
+  
   /*
   X_lo = asm_vpmsumd(H2_lo, in);
   X2_lo = asm_vpmsumd(H2_lo, in2);
