@@ -197,8 +197,8 @@ _gcry_ghash_setup_ppc_vpmsum (uint64_t *gcm_table, void *gcm_key)
 {
   vector16x_u8 bswap_const = { 12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3 };
   volatile vector16x_u8 c2 = { 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0b11000010};
-  volatile vector1x_u128 T0;
-  volatile vector1x_u128 C2, H, H1_invert, H1, H1l, H1h, H2, H2l, H2h;
+  volatile vector1x_u128 T0, T1, T2;
+  volatile vector1x_u128 C2, H, H1, H1l, H1h, H2, H2l, H2h;
   volatile vector16x_s8 most_sig_of_H, t7, carry;
   vector1x_u128 one = {1};
 
@@ -210,18 +210,18 @@ _gcry_ghash_setup_ppc_vpmsum (uint64_t *gcm_table, void *gcm_key)
   H1 = H << one;
   H1 ^= (vector1x_u128)carry; // complete the <<< 1
 
-  T0 = H1 << 64 | H1 >> 64;
-  H1l = T0 >> 64;
-  H1h = T0 << 64;
+  T1 = H1 << 64 | H1 >> 64;
+  H1l = T1 >> 64;
+  H1h = T1 << 64;
   C2 = (vector1x_u128)c2 >> 64;
 
   STORE_TABLE(gcm_table, 0, C2);
   STORE_TABLE(gcm_table, 1, H1l);
-  STORE_TABLE(gcm_table, 2, T0);
+  STORE_TABLE(gcm_table, 2, T1);
   STORE_TABLE(gcm_table, 3, H1h);
 
   H2l = asm_vpmsumd(H1l, H1); // do not need to mask in because 0 * anything -> 0
-  H2 = asm_vpmsumd(T0, H1);
+  H2 = asm_vpmsumd(T1, H1);
   H2h = asm_vpmsumd(H1h, H1);
 
   // reduce 1
@@ -236,26 +236,25 @@ _gcry_ghash_setup_ppc_vpmsum (uint64_t *gcm_table, void *gcm_key)
   H2l = asm_vpmsumd(H2l, C2);
   H2 = H2l ^ H2h ^ T0;
 
-  T0 = H2 << 64 | H2 >> 64;
-  H2l = T0 >> 64;
-  H2h = T0 << 64;
+  T2 = H2 << 64 | H2 >> 64;
+  H2l = T2 >> 64;
+  H2h = T2 << 64;
 
   STORE_TABLE(gcm_table, 4, H2l);
-  STORE_TABLE(gcm_table, 5, T0);
+  STORE_TABLE(gcm_table, 5, T2);
   STORE_TABLE(gcm_table, 6, H2h);
   
-  volatile vector2x_u64 lo, mid, hi, d2, d0, d1, X_lo, X2_lo, X_mid, X2_mid, X_hi, X2_hi, reduce, reduce2, in2;
+  volatile vector2x_u64 X_lo, X2_lo, X_mid, X2_mid, X_hi, X2_hi, reduce, reduce2, H22, H_lo, H_hi, H2_lo, H2_hi;
   
-  /*
-  X_lo = asm_vpmsumd(H2_lo, in);
-  X2_lo = asm_vpmsumd(H2_lo, in2);
-  X_mid = asm_vpmsumd(H2, in);
-  X2_mid = asm_vpmsumd(H2, in2);
-  X_hi = asm_vpmsumd(H2_hi, in);
-  X2_hi = asm_vpmsumd(H2_hi, in2);
+  X_lo = (vector2x_u64)asm_vpmsumd(H2l, H1);
+  X2_lo = (vector2x_u64)asm_vpmsumd(H2l, H2);
+  X_mid = (vector2x_u64)asm_vpmsumd(T2, H1);
+  X2_mid = (vector2x_u64)asm_vpmsumd(T2, H2);
+  X_hi = (vector2x_u64)asm_vpmsumd(H2h, H1);
+  X2_hi = (vector2x_u64)asm_vpmsumd(H2h, H2);
 
-  reduce = asm_vpmsumd(X_lo, C2);
-  reduce2 = asm_vpmsumd(X2_lo, C2);
+  reduce = (vector2x_u64)asm_vpmsumd((block)X_lo, C2);
+  reduce2 = (vector2x_u64)asm_vpmsumd((block)X2_lo, C2);
 
   X_lo ^= (vector2x_u64)((vector1x_u128)X_mid << 64);
   X_hi ^= (vector2x_u64)((vector1x_u128)X_mid >> 64);
@@ -263,21 +262,89 @@ _gcry_ghash_setup_ppc_vpmsum (uint64_t *gcm_table, void *gcm_key)
   X2_hi ^= (vector2x_u64)((vector1x_u128)X2_mid >> 64);
 
   H = ((vector1x_u128)X_lo << 64 | (vector1x_u128)X_lo >> 64);
-  H2[0] = ((vector2x_u64)X2_lo)[1];
-  H2[1] = ((vector2x_u64)X2_lo)[0];
+  H22[0] = ((vector2x_u64)X2_lo)[1];
+  H22[1] = ((vector2x_u64)X2_lo)[0];
 
   H ^=  (vector1x_u128)reduce;
-  H2 ^= reduce2;
+  H22 ^= reduce2;
 
   // We could have also b64 switched reduce and reduce2, however as we are
   // using the unrotated H and H2 above to vpmsum, this is marginally better.
   reduce[0] = ((vector2x_u64)H)[1];
   reduce[1] = ((vector2x_u64)H)[0];
-  reduce2[0] = ((vector2x_u64)H2)[1];
-  reduce2[1] = ((vector2x_u64)H2)[0];
+  reduce2[0] = ((vector2x_u64)H22)[1];
+  reduce2[1] = ((vector2x_u64)H22)[0];
 
-  H =  (vector1x_u128)asm_vpmsumd((vector2x_u64)H, C2);
-  H2 = asm_vpmsumd(H2, C2);
+  H =  (vector1x_u128)asm_vpmsumd((block)H, C2);
+  H22 = (vector2x_u64)asm_vpmsumd((block)H22, C2);
+
+  reduce ^= X_hi;
+  reduce2 ^= X2_hi;
+  H ^= (vector1x_u128)reduce;
+  H22 ^= reduce2;
+
+  volatile vector1x_u128 H3l, H3, H3h, H4l, H4, H4h;
+  
+  H3l = ((vector1x_u128)H << 64);
+  H3l = H3l << 64 | H3l >> 64;
+  H3h = ((vector1x_u128)H >> 64);
+  H3h = H3h << 64| H3h >> 64;
+  H3 = ((vector1x_u128)H << 64 | (vector1x_u128)H >> 64);
+  H4l = ((vector1x_u128)H22 << 64);
+  H4l = H4l << 64 | H4l >> 64;
+  H4h = ((vector1x_u128)H22 >> 64);
+  H4h = H4h << 64 | H4h >> 64;
+  H4 = ((vector1x_u128)H22 << 64 | (vector1x_u128)H22 >> 64);
+
+  STORE_TABLE(gcm_table, 7, H3l);
+  STORE_TABLE(gcm_table, 8, H3);
+  STORE_TABLE(gcm_table, 9, H3h);
+  STORE_TABLE(gcm_table, 10, H4l);
+  STORE_TABLE(gcm_table, 11, H4);
+  STORE_TABLE(gcm_table, 12, H4h);
+  /*
+  volatile block H3, H3l, H3h, H4, H4l, H4h, T3, T4;
+  volatile vector2x_u64 lo, mid, hi, d2, d0, d1, X_lo, X2_lo, X_mid, X2_mid, X_hi, X2_hi, reduce, reduce2, in2;
+  
+  H3l = asm_vpmsumd(H2l, H);
+  H4l = asm_vpmsumd(H2l, H2);
+  H3 = asm_vpmsumd(T2, H);
+  H4 = asm_vpmsumd(T2, H2);
+  H4l = asm_vpmsumd(H2h, H);
+  H4h = asm_vpmsumd(H2h, H2);
+
+  T3 = asm_vpmsumd(H3l, C2);
+  T4 = asm_vpmsumd(H4l, C2);
+
+  H3l ^= H3 << 64;
+  H3h ^= H3 >> 64;
+  H4l ^= H4 << 64;
+  H4h ^= H4 >> 64;
+
+  //H3 = H3l << 64 | H4l >> 64;
+  //H4 = H4l << 64 | H4l >> 64;
+  //H = ((vector1x_u128)X_lo << 64 | (vector1x_u128)X_lo >> 64);
+  //H2[0] = ((vector2x_u64)X2_lo)[1];
+  //H2[1] = ((vector2x_u64)X2_lo)[0];
+
+  H3l ^= T3 << 64 | T3 >> 64;
+  H4l ^= T4 << 64 | T4 >> 64;
+  //H ^=  (vector1x_u128)reduce;
+  //H2 ^= reduce2;
+
+  // We could have also b64 switched reduce and reduce2, however as we are
+  // using the unrotated H and H2 above to vpmsum, this is marginally better.
+  T3 = H3l << 64 | H3l >> 64;
+  T4 = H4l << 64 | H4l >> 64;
+  //T3 = H3 << 64 | H3 >> 64;
+  //T4 = H3 << 64 | H4 >> 64;
+  //reduce[0] = ((vector2x_u64)H)[1];
+  //reduce[1] = ((vector2x_u64)H)[0];
+  //reduce2[0] = ((vector2x_u64)H2)[1];
+  //reduce2[1] = ((vector2x_u64)H2)[0];
+
+  H = asm_vpmsumd(T3, C2);
+  H2 = asm_vpmsumd(T4, C2);
 
   reduce ^= X_hi;
   reduce2 ^= X2_hi;
