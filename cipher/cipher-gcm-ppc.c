@@ -199,6 +199,7 @@ _gcry_ghash_setup_ppc_vpmsum (uint64_t *gcm_table, void *gcm_key)
   volatile vector16x_u8 c2 = { 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0b11000010};
   volatile vector1x_u128 T0, T1, T2;
   volatile vector1x_u128 C2, H, H1, H1l, H1h, H2, H2l, H2h;
+  volatile vector1x_u128 H3l, H3, H3h, H4l, H4, H4h, T3, T4;
   volatile vector16x_s8 most_sig_of_H, t7, carry;
   vector1x_u128 one = {1};
 
@@ -244,26 +245,23 @@ _gcry_ghash_setup_ppc_vpmsum (uint64_t *gcm_table, void *gcm_key)
   STORE_TABLE(gcm_table, 5, T2);
   STORE_TABLE(gcm_table, 6, H2h);
   
-  volatile vector1x_u128 H3l, H3, H3h, H4l, H4, H4h, T3, T4;
-  volatile vector2x_u64 X_lo, X2_lo, X_mid, X2_mid, X_hi, X2_hi, reduce, reduce2, H22, H_lo, H_hi, H2_lo, H2_hi;
-  
-  X_lo = (vector2x_u64)asm_vpmsumd(H2l, H1);
-  X2_lo = (vector2x_u64)asm_vpmsumd(H2l, H2);
-  X_mid = (vector2x_u64)asm_vpmsumd(T2, H1);
-  X2_mid = (vector2x_u64)asm_vpmsumd(T2, H2);
-  X_hi = (vector2x_u64)asm_vpmsumd(H2h, H1);
-  X2_hi = (vector2x_u64)asm_vpmsumd(H2h, H2);
+  H3l = asm_vpmsumd(H2l, H1);
+  H4l = asm_vpmsumd(H2l, H2);
+  H3 = asm_vpmsumd(T2, H1);
+  H4 = asm_vpmsumd(T2, H2);
+  H3h = asm_vpmsumd(H2h, H1);
+  H4h = asm_vpmsumd(H2h, H2);
 
-  T3 = asm_vpmsumd((block)X_lo, C2);
-  T4 = asm_vpmsumd((block)X2_lo, C2);
+  T3 = asm_vpmsumd(H3l, C2);
+  T4 = asm_vpmsumd(H4l, C2);
 
-  X_lo ^= (vector2x_u64)((vector1x_u128)X_mid << 64);
-  X_hi ^= (vector2x_u64)((vector1x_u128)X_mid >> 64);
-  X2_lo ^= (vector2x_u64)((vector1x_u128)X2_mid << 64);
-  X2_hi ^= (vector2x_u64)((vector1x_u128)X2_mid >> 64);
+  H3l ^= H3 << 64;
+  H3h ^= H3 >> 64;
+  H4l ^= H4 << 64;
+  H4h ^= H4 >> 64;
 
-  H3 = ((vector1x_u128)X_lo << 64 | (vector1x_u128)X_lo >> 64);
-  H4 = (vector1x_u128)X2_lo >> 64 | (vector1x_u128)X2_lo << 64;
+  H3 = H3l << 64 | H3l >> 64;
+  H4 = H4l << 64 | H4l >> 64;
 
   H3 ^= T3;
   H4 ^= T4;
@@ -276,8 +274,8 @@ _gcry_ghash_setup_ppc_vpmsum (uint64_t *gcm_table, void *gcm_key)
   H3 = asm_vpmsumd(H3, C2);
   H4 = asm_vpmsumd(H4, C2);
 
-  T3 ^= (vector1x_u128)X_hi;
-  T4 ^= (vector1x_u128)X2_hi;
+  T3 ^= H3h;
+  T4 ^= H4h;
   H3 ^= T3;
   H4 ^= T4;
   H3 = H3 << 64 | H3 >> 64;
