@@ -50,6 +50,7 @@ libcipher_la_SOURCES = \
 	cipher-cmac.c \
 	cipher-gcm.c cipher-gcm-intel-pclmul.c cipher-gcm-armv7-neon.S \
 	cipher-gcm-armv8-aarch32-ce.S cipher-gcm-armv8-aarch64-ce.S \
+	cipher-gcm-ppc.c \
 	cipher-poly1305.c \
 	cipher-ocb.c \
 	cipher-xts.c \
@@ -250,4 +251,10 @@ crc-ppc.o: $(srcdir)/crc-ppc.c Makefile
 	`echo $(COMPILE) $(ppc_vcrypto_cflags) -c $< | $(instrumentation_munging) `
 
 crc-ppc.lo: $(srcdir)/crc-ppc.c Makefile
+	`echo $(LTCOMPILE) $(ppc_vcrypto_cflags) -c $< | $(instrumentation_munging) `
+
+cipher-gcm-ppc.o: $(srcdir)/cipher-gcm-ppc.c Makefile
+	`echo $(COMPILE) $(ppc_vcrypto_cflags) -c $< | $(instrumentation_munging) `
+
+chiper-gcm-ppc.lo: $(srcdir)/cipher-gcm-ppc.c Makefile
 	`echo $(LTCOMPILE) $(ppc_vcrypto_cflags) -c $< | $(instrumentation_munging) `
